@@ -1,17 +1,13 @@
-import streamlit as st
-
-def apply_styles():
-    st.markdown('''
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-    html, body, [class*="css"] {font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;}
-    .stApp {background: linear-gradient(180deg,#f5f7fb 0%,#ffffff 100%);} .block-container{padding-top:2rem;}
-    .hero{background:linear-gradient(135deg,#fff 0%,#eef4ff 100%);border-radius:32px;padding:30px;border:1px solid #e5e7eb;box-shadow:0 18px 50px rgba(0,0,0,.06);margin-bottom:22px;}
-    .title{font-size:44px;font-weight:800;letter-spacing:-1.3px;color:#111827}.subtitle{color:#6b7280;font-size:16px;margin-top:4px}
-    .card{background:rgba(255,255,255,.92);border:1px solid rgba(230,230,235,.95);box-shadow:0 12px 34px rgba(0,0,0,.06);border-radius:26px;padding:22px;margin-bottom:18px;}
-    .pill{display:inline-block;padding:6px 12px;border-radius:999px;background:#eef2ff;color:#1d4ed8;font-weight:700;font-size:13px;margin-right:6px;}
-    .low{color:#12805c;font-weight:800}.medium{color:#b76e00;font-weight:800}.high{color:#b42318;font-weight:800}
-    div.stButton > button{border-radius:16px;border:1px solid #d1d5db;background:#111827;color:white;font-weight:700;padding:.65rem 1rem;}
-    div.stDownloadButton > button{border-radius:16px;font-weight:700} [data-testid="stMetricValue"]{font-size:30px;font-weight:800;}
-    </style>
-    ''', unsafe_allow_html=True)
+def inject_css():
+    return """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+:root{--bg:#f5f7fb;--card:#ffffff;--text:#0f172a;--muted:#64748b;--line:#e5e7eb;--blue:#0a84ff;--green:#16a34a;--orange:#f59e0b;--red:#dc2626;}
+html, body, [class*="css"]{font-family:'Inter',-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI',sans-serif;}
+.stApp{background:radial-gradient(circle at top left,#eef6ff 0,#f7f9fd 32%,#ffffff 100%);}
+.block-container{padding-top:1.2rem;max-width:1180px;}
+.hero{padding:26px;border-radius:32px;background:linear-gradient(135deg,rgba(255,255,255,.95),rgba(238,246,255,.92));border:1px solid rgba(226,232,240,.9);box-shadow:0 18px 48px rgba(15,23,42,.08);margin-bottom:18px;}
+.hero h1{margin:0;font-size:40px;line-height:1.05;font-weight:900;letter-spacing:-1.3px;color:var(--text)}
+.hero p{margin:8px 0 0;color:var(--muted);font-size:15px}.pill{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:#eef6ff;color:#075985;font-weight:700;font-size:12px;border:1px solid #dbeafe;margin-bottom:10px}.card{background:rgba(255,255,255,.92);border:1px solid rgba(226,232,240,.95);box-shadow:0 12px 34px rgba(15,23,42,.06);border-radius:26px;padding:20px;margin-bottom:16px}.mini-card{background:#fff;border:1px solid #e5e7eb;border-radius:22px;padding:16px;box-shadow:0 8px 24px rgba(15,23,42,.04)}.section-title{font-size:22px;font-weight:850;letter-spacing:-.4px;margin:8px 0 12px;color:var(--text)}.muted{color:var(--muted);font-size:13px}.risk-low{color:var(--green);font-weight:900}.risk-medium{color:var(--orange);font-weight:900}.risk-high{color:var(--red);font-weight:900}.clinical-box{background:#f8fafc;border-left:5px solid var(--blue);border-radius:16px;padding:14px 16px;margin:12px 0}.bottom-nav{position:sticky;bottom:10px;background:rgba(255,255,255,.88);backdrop-filter:blur(18px);border:1px solid #e5e7eb;border-radius:24px;padding:10px;box-shadow:0 18px 60px rgba(15,23,42,.18);z-index:999}div.stButton>button{border-radius:16px;border:0;background:#111827;color:white;font-weight:800;padding:.68rem 1rem;box-shadow:0 8px 18px rgba(15,23,42,.18)}div.stDownloadButton>button{border-radius:16px;font-weight:800}.stSelectbox [data-baseweb="select"], .stTextInput input, .stNumberInput input, textarea{border-radius:16px!important} [data-testid="stMetric"]{background:rgba(255,255,255,.88);border:1px solid #e5e7eb;border-radius:22px;padding:14px;box-shadow:0 8px 22px rgba(15,23,42,.04)}[data-testid="stMetricValue"]{font-weight:900;font-size:28px}@media(max-width:760px){.block-container{padding-left:.8rem;padding-right:.8rem}.hero{padding:20px;border-radius:24px}.hero h1{font-size:30px}.card{padding:16px;border-radius:22px}.section-title{font-size:19px} [data-testid="column"]{width:100%!important;flex:1 1 100%!important}}
+</style>
+"""
