@@ -1,4 +1,9 @@
 import streamlit as st
+from database import init_db, get_patients
+
+init_db()   # مهم جداً قبل get_patients
+
+patients = get_patients() streamlit as st
 import pandas as pd
 import os, json
 from database import *
