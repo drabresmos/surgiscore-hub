@@ -1,0 +1,32 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      APP_MODE: demo
+      HOSPITAL_NAME: General Surgery Department Pilot
+      TIMEZONE: Asia/Baghdad
+      DATABASE_URL: postgresql+psycopg://surgiscore:CHANGE_ME@db:5432/surgiscore
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: surgiscore
+      POSTGRES_USER: surgiscore
+      POSTGRES_PASSWORD: CHANGE_ME
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U surgiscore -d surgiscore"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
