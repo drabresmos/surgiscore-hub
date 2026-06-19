@@ -1,188 +1,148 @@
 import streamlit as st
 import pandas as pd
-
-from database import (
-    init_db, add_patient, update_patient, get_patients, get_patient, delete_patient,
-    add_result, get_results, delete_result, add_attachment, get_attachments,
-    get_attachment_data, delete_attachment
-)
-from scores_library import CATEGORIES, render_score
-from styles import apply_styles, hero, risk_badge
+from datetime import date, time
+from database import *
+from styles import apply_styles
+from scores_library import CATEGORIES, run_score
 
 init_db()
 st.set_page_config(page_title='SurgiScore Hub', page_icon='🏥', layout='wide')
 apply_styles()
-hero()
+
+st.markdown('''<div class="hero"><div class="title">🏥 SurgiScore Hub</div><div class="subtitle">منصة Board-ready لحساب Surgical Scores، حفظ المرضى، المرفقات، وجدولة العمليات.</div><span class="pill">Arabic UI • English Medical Terms • Mobile/iPad ready</span></div>''', unsafe_allow_html=True)
 
 st.sidebar.title('SurgiScore Hub')
-page = st.sidebar.radio('Navigation', ['Dashboard','Board Study Mode','Patients','Score Calculator','Attachments','Results / Backup'])
+lang = st.sidebar.radio('Language / اللغة', ['العربية + English terms','English'], index=0)
+page = st.sidebar.radio('Navigation', ['Dashboard','Board Study Mode','Patients','Score Calculator','Operation Schedule','Calendar View','Attachments','Results / Backup'])
 
 patients = get_patients()
-results = get_results()
+patient_options = {f"{p['code']} — {p['name']}": p['id'] for p in patients}
+
+def risk_badge(risk):
+    cls = 'low' if risk=='Low' else 'medium' if risk=='Medium' else 'high'
+    st.markdown(f"<span class='{cls}'>Risk: {risk}</span>", unsafe_allow_html=True)
 
 if page == 'Dashboard':
+    st.subheader('لوحة التحكم Dashboard')
+    ops = get_operations(); results = get_results()
     c1,c2,c3,c4 = st.columns(4)
-    c1.metric('Patients', len(patients))
-    c2.metric('Saved Scores', len(results))
-    c3.metric('High Risk', sum(1 for r in results if r.get('risk')=='High'))
-    c4.metric('Score Categories', len(CATEGORIES))
-
-    st.markdown('### Quick start for board trainees')
-    st.markdown('''
-<div class="card">
-<b>Workflow:</b> Add patient → choose clinical category → calculate score → save result → attach labs/images → export backup.
-<br><br>
-<span class="small">This app is an educational and documentation aid. It does not replace consultant judgment, local guidelines, or hospital policy.</span>
-</div>
-''', unsafe_allow_html=True)
-
-    st.markdown('### Recent Results')
-    if results:
-        st.dataframe(pd.DataFrame(results), use_container_width=True)
-    else:
-        st.info('No results yet.')
+    c1.metric('Patients', len(patients)); c2.metric('Scores', len(results)); c3.metric('Scheduled Operations', len(ops)); c4.metric('High Risk', sum(1 for r in results if r.get('risk')=='High'))
+    st.markdown('### عمليات قادمة Upcoming Operations')
+    if ops: st.dataframe(pd.DataFrame(ops), use_container_width=True)
+    else: st.info('لا توجد عمليات مجدولة بعد.')
 
 elif page == 'Board Study Mode':
-    st.markdown('### Board Study Mode')
-    category = st.selectbox('Select surgical domain', list(CATEGORIES.keys()))
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.write(f'**{category}**')
-    for score in CATEGORIES[category]:
-        st.markdown(f'- **{score}**')
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.info('Use this page as a checklist before exams, ER shifts, and case discussions.')
+    st.subheader('وضع طلبة البورد Board Study Mode')
+    st.info('اختر category ثم score. المصطلحات الطبية تبقى English لتناسب الامتحانات والـ rounds.')
+    for cat, scores in CATEGORIES.items():
+        with st.expander(cat, expanded=False):
+            for s in scores:
+                st.write(f'• **{s}**')
 
 elif page == 'Patients':
-    tab1, tab2 = st.tabs(['Add Patient','Registry / Edit / Delete'])
-
+    st.subheader('المرضى Patients')
+    tab1, tab2 = st.tabs(['إضافة مريض Add Patient','السجل Registry'])
     with tab1:
-        st.markdown('### Add Patient')
-        with st.form('add_patient_form'):
+        with st.form('add_patient'):
             col1,col2 = st.columns(2)
             with col1:
-                code = st.text_input('Patient code / ID')
-                name = st.text_input('Name')
-                age = st.number_input('Age', 0, 120, 30)
-                sex = st.selectbox('Sex', ['Male','Female'])
+                code=st.text_input('Patient Code / ID'); name=st.text_input('Patient Name'); age=st.number_input('Age',0,120,30); sex=st.selectbox('Sex',['Male','Female'])
             with col2:
-                diagnosis = st.text_input('Diagnosis')
-                operation = st.text_input('Operation / plan')
-                notes = st.text_area('Clinical notes')
+                diagnosis=st.text_input('Diagnosis'); operation=st.text_input('Planned / Performed Operation'); notes=st.text_area('Clinical Notes')
             if st.form_submit_button('Save Patient'):
-                if not code.strip():
-                    st.error('Patient code is required.')
-                else:
-                    try:
-                        add_patient(code.strip(), name, age, sex, diagnosis, operation, notes)
-                        st.success('Patient added.')
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f'Could not add patient. Code may already exist. Details: {e}')
-
+                if not code: st.error('Patient Code مطلوب')
+                else: add_patient(code,name,age,sex,diagnosis,operation,notes); st.success('تم حفظ المريض'); st.rerun()
     with tab2:
-        st.markdown('### Patient Registry')
-        patients = get_patients()
-        if not patients:
-            st.info('No patients yet.')
-        else:
-            search = st.text_input('Search by code/name/diagnosis')
-            shown = patients
-            if search:
-                s=search.lower()
-                shown=[p for p in patients if s in str(p.get('code','')).lower() or s in str(p.get('name','')).lower() or s in str(p.get('diagnosis','')).lower()]
-            for p in shown:
-                with st.expander(f"{p['code']} — {p.get('name','')} | {p.get('diagnosis','')}"):
-                    with st.form(f'edit_{p["id"]}'):
-                        col1,col2=st.columns(2)
-                        with col1:
-                            code=st.text_input('Code', p.get('code',''), key=f'code_{p["id"]}')
-                            name=st.text_input('Name', p.get('name',''), key=f'name_{p["id"]}')
-                            age=st.number_input('Age',0,120,int(p.get('age') or 0), key=f'age_{p["id"]}')
-                            sex=st.selectbox('Sex',['Male','Female'], index=0 if p.get('sex')!='Female' else 1, key=f'sex_{p["id"]}')
-                        with col2:
-                            diagnosis=st.text_input('Diagnosis', p.get('diagnosis',''), key=f'dx_{p["id"]}')
-                            operation=st.text_input('Operation', p.get('operation',''), key=f'op_{p["id"]}')
-                            notes=st.text_area('Notes', p.get('notes',''), key=f'notes_{p["id"]}')
-                        a,b=st.columns(2)
-                        if a.form_submit_button('Update'):
-                            update_patient(p['id'], code, name, age, sex, diagnosis, operation, notes)
-                            st.success('Updated.')
-                            st.rerun()
-                        if b.form_submit_button('Delete patient and all data'):
-                            delete_patient(p['id'])
-                            st.warning('Deleted.')
-                            st.rerun()
+        q=st.text_input('Search by code/name/diagnosis')
+        rows=patients
+        if q: rows=[p for p in rows if q.lower() in str(p).lower()]
+        for p in rows:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            c1,c2,c3=st.columns([3,3,1])
+            c1.write(f"**{p['code']} — {p['name']}**"); c1.caption(f"{p['age']} years | {p['sex']}")
+            c2.write(f"**Diagnosis:** {p['diagnosis']}"); c2.write(f"**Operation:** {p['operation']}")
+            if c3.button('Delete', key=f"delp{p['id']}"):
+                delete_patient(p['id']); st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
 elif page == 'Score Calculator':
-    st.markdown('### Score Calculator')
-    patients = get_patients()
-    if not patients:
-        st.warning('Add a patient first.')
+    st.subheader('حاسبة السكورات Score Calculator')
+    if not patients: st.warning('أضف مريض أولاً.')
     else:
-        pmap={f"{p['code']} — {p.get('name','')}":p['id'] for p in patients}
-        selected = st.selectbox('Patient', list(pmap.keys()))
-        pid = pmap[selected]
-        patient = get_patient(pid)
-        st.markdown(f"<div class='card'><b>{patient['code']} — {patient.get('name','')}</b><br><span class='muted'>{patient.get('age')} years | {patient.get('sex')} | {patient.get('diagnosis')}</span></div>", unsafe_allow_html=True)
-
-        col1,col2 = st.columns(2)
-        category = col1.selectbox('Category', list(CATEGORIES.keys()))
-        score_name = col2.selectbox('Score', CATEGORIES[category])
-        st.divider()
-        result, interpretation, risk = render_score(score_name)
-        st.markdown('### Result')
-        r1,r2=st.columns([1,2])
-        r1.metric(score_name, result)
-        with r2:
-            st.write(interpretation)
-            risk_badge(risk)
-        summary = f"Patient {patient['code']} ({patient.get('age')}y, {patient.get('sex')}) — {score_name}: {result}. Interpretation: {interpretation}. Risk: {risk}."
-        st.text_area('Clinical summary', summary, height=110)
+        selected=st.selectbox('Select Patient', list(patient_options.keys()))
+        pid=patient_options[selected]; p=get_patient(pid)
+        st.markdown(f"<div class='card'><b>{p['code']} — {p['name']}</b><br>Diagnosis: {p['diagnosis']}<br>Operation: {p['operation']}</div>", unsafe_allow_html=True)
+        cat=st.selectbox('Category', list(CATEGORIES.keys()))
+        score=st.selectbox('Score', CATEGORIES[cat])
+        result, interp, risk = run_score(score)
+        st.metric(score, result); st.write(interp); risk_badge(risk)
         if st.button('Save Result'):
-            add_result(pid, score_name, category, result, interpretation, risk, summary)
-            st.success('Result saved.')
+            add_result(pid, score, result, interp, risk); st.success('تم حفظ النتيجة')
+
+elif page == 'Operation Schedule':
+    st.subheader('جدولة العمليات Operation Schedule')
+    if not patients: st.warning('أضف مريض أولاً.')
+    else:
+        with st.form('schedule_op'):
+            selected=st.selectbox('Patient', list(patient_options.keys()))
+            pid=patient_options[selected]
+            col1,col2=st.columns(2)
+            with col1:
+                title=st.text_input('Operation Title', value='Laparoscopic cholecystectomy')
+                op_type=st.selectbox('Operation Type',['Elective','Emergency','Day-case','Major','Minor'])
+                op_date=st.date_input('Date', value=date.today())
+                op_time=st.time_input('Time', value=time(9,0))
+            with col2:
+                surgeon=st.text_input('Surgeon / Team'); hospital=st.text_input('Hospital / Theater'); status=st.selectbox('Status',['Planned','Confirmed','Done','Cancelled','Postponed']); notes=st.text_area('Notes')
+            if st.form_submit_button('Save Operation'):
+                add_operation(pid,title,op_type,str(op_date),str(op_time),surgeon,hospital,status,notes); st.success('تمت جدولة العملية')
+        st.markdown('### Scheduled Operations')
+        ops=get_operations()
+        if ops: st.dataframe(pd.DataFrame(ops), use_container_width=True)
+
+elif page == 'Calendar View':
+    st.subheader('Calendar View / استعراض المرضى حسب تاريخ العملية')
+    ops=get_operations()
+    if not ops: st.info('لا توجد عمليات مجدولة.')
+    else:
+        df=pd.DataFrame(ops)
+        selected_date=st.date_input('Choose date', value=date.today())
+        day=df[df['operation_date']==str(selected_date)]
+        st.markdown(f'### Operations on {selected_date}')
+        if day.empty: st.info('لا توجد عمليات في هذا اليوم.')
+        else:
+            for _,r in day.iterrows():
+                st.markdown(f"<div class='card'><b>{r['operation_time']} — {r['operation_title']}</b><br>Patient: {r['code']} — {r['name']} | Age: {r['age']} | Sex: {r['sex']}<br>Diagnosis: {r['diagnosis']}<br>Surgeon: {r['surgeon']} | Hospital: {r['hospital']}<br>Status: {r['status']}</div>", unsafe_allow_html=True)
+        st.markdown('### Full Calendar Table')
+        st.dataframe(df, use_container_width=True)
+        st.download_button('Download Operations CSV', df.to_csv(index=False).encode('utf-8'), 'operations_calendar.csv', 'text/csv')
 
 elif page == 'Attachments':
-    st.markdown('### Attachments')
-    patients = get_patients()
-    if not patients:
-        st.warning('Add a patient first.')
+    st.subheader('المرفقات Attachments')
+    if not patients: st.warning('أضف مريض أولاً.')
     else:
-        pmap={f"{p['code']} — {p.get('name','')}":p['id'] for p in patients}
-        selected = st.selectbox('Patient', list(pmap.keys()))
-        pid = pmap[selected]
-        files = st.file_uploader('Upload labs, CT photos, operative notes, PDFs', type=['png','jpg','jpeg','pdf','txt','csv'], accept_multiple_files=True)
+        selected=st.selectbox('Patient', list(patient_options.keys()))
+        pid=patient_options[selected]
+        files=st.file_uploader('Upload labs / CT / photos / PDF', type=['png','jpg','jpeg','pdf','txt','csv'], accept_multiple_files=True)
         if files:
-            for f in files:
-                add_attachment(pid, f.name, f.type, round(f.size/1024,1), f.getvalue())
-            st.success('Uploaded.')
-            st.rerun()
+            for f in files: add_attachment(pid, f.name, f.type, f.getvalue())
+            st.success('تم رفع المرفقات')
         for a in get_attachments(pid):
             st.markdown('<div class="card">', unsafe_allow_html=True)
             c1,c2,c3=st.columns([4,2,1])
-            c1.write(f"**{a['filename']}**")
-            c1.caption(f"{a['filetype']} | {a['size_kb']} KB | {a['created_at']}")
-            data=get_attachment_data(a['id'])
-            c2.download_button('Download', data['data'], a['filename'], a['filetype'], key=f'down_{a["id"]}')
-            if c3.button('Delete', key=f'delatt_{a["id"]}'):
+            c1.write(f"**{a['filename']}**"); c1.caption(a['filetype'])
+            c2.download_button('Download', a['data'], a['filename'], a['filetype'], key=f"down{a['id']}")
+            if c3.button('Delete', key=f"dela{a['id']}"):
                 delete_attachment(a['id']); st.rerun()
-            if a['filetype'] and a['filetype'].startswith('image'):
-                st.image(data['data'], width=360)
+            if str(a['filetype']).startswith('image'): st.image(a['data'], width=320)
             st.markdown('</div>', unsafe_allow_html=True)
 
 elif page == 'Results / Backup':
-    st.markdown('### Results / Backup')
-    results=get_results()
-    if not results:
-        st.info('No results saved.')
-    else:
-        df=pd.DataFrame(results)
-        search=st.text_input('Search results')
-        if search:
-            s=search.lower()
-            df=df[df.astype(str).apply(lambda row: row.str.lower().str.contains(s).any(), axis=1)]
-        st.dataframe(df, use_container_width=True)
-        st.download_button('Download results CSV', df.to_csv(index=False).encode('utf-8'), 'surgiscore_results.csv', 'text/csv')
-        rid=st.number_input('Delete result by ID', min_value=0, step=1)
-        if st.button('Delete selected result') and rid:
-            delete_result(int(rid)); st.rerun()
+    st.subheader('النتائج والنسخ الاحتياطي Results / Backup')
+    res=get_results(); ops=get_operations(); pts=get_patients()
+    if res: st.dataframe(pd.DataFrame(res), use_container_width=True)
+    else: st.info('لا توجد نتائج محفوظة.')
+    c1,c2,c3=st.columns(3)
+    c1.download_button('Patients CSV', pd.DataFrame(pts).to_csv(index=False).encode('utf-8'), 'patients.csv', 'text/csv')
+    c2.download_button('Results CSV', pd.DataFrame(res).to_csv(index=False).encode('utf-8'), 'results.csv', 'text/csv')
+    c3.download_button('Operations CSV', pd.DataFrame(ops).to_csv(index=False).encode('utf-8'), 'operations.csv', 'text/csv')
