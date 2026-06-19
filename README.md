@@ -1,17 +1,11 @@
-# SurgiScore Hub v2
+# SurgiScore Hub v3.1
 
-Streamlit surgical score platform with Apple-style UI.
+Streamlit surgical scoring platform for general surgery trainees.
 
-## Files
-- app.py
-- database.py
-- scores_library.py
-- styles.py
-- reports.py
-- requirements.txt
+## Deploy on Streamlit Cloud
+- Upload all files to GitHub repository.
+- Main file path: `app.py`
+- Requirements are in `requirements.txt`.
 
-## Streamlit Cloud
-Main file path: `app.py`
-
-## Notes
-This version stores data in Streamlit session state. It is suitable for MVP/demo. For production, use persistent database such as Supabase/PostgreSQL.
+## Note
+SQLite storage works inside the app environment, but Streamlit Cloud storage can reset after redeploy/reboot. For production use, migrate to Supabase/PostgreSQL.

@@ -1,176 +1,272 @@
 import math
 import streamlit as st
 
-SCORES = {
- 'Perioperative': ['ASA','RCRI','Caprini VTE','Charlson Comorbidity Index','Clinical Frailty Scale','STOP-Bang'],
- 'Sepsis / Emergency': ['SIRS','qSOFA','NEWS2','Shock Index','SOFA Simplified'],
- 'Appendicitis': ['Alvarado','AIR Appendicitis','RIPASA','Pediatric Appendicitis Score'],
- 'Biliary': ['Tokyo Cholecystitis Grade','Tokyo Cholangitis Grade','ASGE CBD Stone Risk','Nassar Difficulty Grade','Parkland Grade','Csendes Mirizzi'],
- 'Pancreas': ['BISAP','Ranson Admission','Glasgow-Imrie','Modified CTSI','Atlanta Classification'],
- 'GI Bleeding': ['Glasgow-Blatchford','AIMS65','Rockall Pre-Endoscopy','Oakland Lower GI Bleeding'],
- 'Peritonitis / Perforation': ['Mannheim Peritonitis Index','Boey Score'],
- 'Liver': ['Child-Pugh','MELD-Na','ALBI Grade'],
- 'Colorectal': ['Hinchey Diverticulitis','WSES Diverticulitis','LARS Score','Wexner Incontinence Score'],
- 'Trauma': ['GCS','RTS','AAST Organ Injury Grade'],
- 'Postoperative': ['Clavien-Dindo','CDC SSI Classification']
+CATEGORIES = {
+    'Perioperative': ['ASA','Clinical Frailty Scale','Charlson Comorbidity Index','STOP-Bang','Caprini VTE','RCRI'],
+    'Emergency / Sepsis': ['SIRS','qSOFA','NEWS2','Shock Index','SOFA Simplified'],
+    'Appendicitis': ['Alvarado','AIR Appendicitis','RIPASA','Pediatric Appendicitis Score'],
+    'Gallbladder / CBD': ['Tokyo Cholecystitis Grade','Tokyo Cholangitis Grade','ASGE CBD Stone Risk','Nassar Difficulty Grade','Parkland Cholecystitis Grade','Csendes Mirizzi Classification'],
+    'Pancreas': ['BISAP','Ranson Admission','Glasgow-Imrie Pancreatitis','Modified CT Severity Index','Atlanta Pancreatitis Classification'],
+    'GI Bleeding': ['Glasgow-Blatchford','AIMS65','Rockall Pre-Endoscopy','Oakland Lower GI Bleeding'],
+    'Peritonitis / Perforation': ['Mannheim Peritonitis Index','Boey Score'],
+    'Liver / HPB': ['Child-Pugh','MELD-Na','ALBI Grade'],
+    'Colorectal': ['Hinchey Diverticulitis','WSES Diverticulitis Classification','LARS Score','Wexner Incontinence Score'],
+    'Trauma': ['GCS','RTS','AAST Organ Injury Grade'],
+    'Postoperative': ['Clavien-Dindo','CDC SSI Classification']
 }
 
-INFO = {
- 'ASA':'Preoperative anesthesia and systemic disease status.', 'RCRI':'Major cardiac complication risk before non-cardiac surgery.',
- 'Caprini VTE':'Venous thromboembolism risk stratification.', 'Alvarado':'Clinical probability of acute appendicitis.',
- 'BISAP':'Early severity risk in acute pancreatitis.', 'Glasgow-Blatchford':'Upper GI bleeding intervention/admission risk.',
- 'MELD-Na':'Liver disease short-term mortality risk.', 'Clavien-Dindo':'Postoperative complication severity classification.'
+SCORE_INFO = {
+    'ASA':'Baseline anesthetic fitness. Use for every operative patient.',
+    'Caprini VTE':'VTE risk stratification and thromboprophylaxis planning.',
+    'RCRI':'Major cardiac event risk in non-cardiac surgery.',
+    'Alvarado':'Clinical probability of acute appendicitis.',
+    'BISAP':'Early acute pancreatitis severity.',
+    'Glasgow-Blatchford':'Need for intervention/admission in upper GI bleeding.',
 }
 
-def cb(label, pts=1):
-    return pts if st.checkbox(f'{label} (+{pts})') else 0
+def cb(label, points=1):
+    return points if st.checkbox(f'{label} (+{points})') else 0
 
-def show_info(name):
-    st.caption(INFO.get(name, 'Clinical score/classification for surgical decision support.'))
+def render_score(name):
+    st.caption(SCORE_INFO.get(name, 'Educational scoring aid. Interpret with clinical judgment.'))
 
-def calc_score(name):
-    show_info(name)
-    risk='Low'; interp=''; rec='Use with clinical judgment.'; result=''
+    if name=='ASA':
+        val=st.radio('ASA class', ['ASA I - Healthy','ASA II - Mild systemic disease','ASA III - Severe systemic disease','ASA IV - Constant threat to life','ASA V - Moribund'])
+        result=val.split(' - ')[0]; risk='Low' if result in ['ASA I','ASA II'] else ('Medium' if result=='ASA III' else 'High')
+        return result,val,risk
 
-    if name == 'ASA':
-        asa = st.radio('ASA class', ['ASA I - Healthy','ASA II - Mild systemic disease','ASA III - Severe systemic disease','ASA IV - Constant threat to life','ASA V - Moribund'])
-        result = asa.split(' - ')[0]; interp = asa; risk = 'Low' if result in ['ASA I','ASA II'] else 'High'; rec='Document ASA and optimize comorbidities before surgery.'
+    if name=='Clinical Frailty Scale':
+        result=st.selectbox('CFS', ['1 Very fit','2 Well','3 Managing well','4 Vulnerable','5 Mildly frail','6 Moderately frail','7 Severely frail','8 Very severely frail','9 Terminally ill'])
+        n=int(result[0]); risk='Low' if n<=3 else ('Medium' if n<=5 else 'High')
+        return n,result,risk
 
-    elif name == 'RCRI':
-        score=sum(cb(x) for x in ['High-risk surgery','Ischemic heart disease','Heart failure','Cerebrovascular disease','Insulin-dependent diabetes','Creatinine >2 mg/dL'])
-        result=score; risk='Low' if score==0 else 'Medium' if score==1 else 'High'; interp=f'RCRI {score} cardiac risk category: {risk}.'; rec='Consider ECG, optimization, anesthesia/cardiology review if elevated.'
+    if name=='Charlson Comorbidity Index':
+        score=0
+        for item,pts in [('MI',1),('CHF',1),('Peripheral vascular disease',1),('CVA/TIA',1),('Dementia',1),('COPD',1),('Connective tissue disease',1),('Peptic ulcer disease',1),('Mild liver disease',1),('Diabetes',1),('Diabetes with end-organ damage',2),('Hemiplegia',2),('Moderate/severe renal disease',2),('Any tumor',2),('Leukemia',2),('Lymphoma',2),('Moderate/severe liver disease',3),('Metastatic solid tumor',6),('AIDS',6)]:
+            score += cb(item,pts)
+        risk='Low' if score<=2 else ('Medium' if score<=5 else 'High')
+        return score, 'Higher score indicates higher comorbidity burden.', risk
 
-    elif name == 'Caprini VTE':
-        items={'Age 41–60':1,'Age 61–74':2,'Age ≥75':3,'Minor surgery':1,'Major surgery >45 min':2,'BMI >25':1,'Varicose veins':1,'Cancer':2,'Bed rest >72h':2,'Central venous access':2,'Prior DVT/PE':3,'Thrombophilia':3,'Stroke <1 month':5,'Lower limb arthroplasty/fracture':5}
-        score=sum(cb(k,v) for k,v in items.items()); result=score
-        risk='Low' if score<=2 else 'Medium' if score<=4 else 'High'; interp=f'Caprini {score}: {risk} VTE risk.'; rec='Choose mechanical/pharmacologic prophylaxis according to bleeding risk.'
+    if name=='STOP-Bang':
+        score=0
+        for item in ['Snoring','Tiredness','Observed apnea','High blood pressure','BMI >35','Age >50','Neck circumference >40 cm','Male sex']:
+            score += cb(item,1)
+        risk='Low' if score<=2 else ('Medium' if score<=4 else 'High')
+        return f'{score}/8', 'OSA risk screening.', risk
 
-    elif name == 'Charlson Comorbidity Index':
-        items={'MI':1,'CHF':1,'PVD':1,'CVA/TIA':1,'Dementia':1,'COPD':1,'Connective tissue disease':1,'Peptic ulcer':1,'Mild liver disease':1,'Diabetes':1,'Hemiplegia':2,'Moderate/severe renal disease':2,'Diabetes with end-organ damage':2,'Tumor':2,'Leukemia/Lymphoma':2,'Moderate/severe liver disease':3,'Metastatic tumor':6,'AIDS':6}
-        score=sum(cb(k,v) for k,v in items.items()); result=score; risk='Low' if score<=2 else 'Medium' if score<=4 else 'High'; interp=f'CCI {score}: comorbidity burden {risk}.'; rec='Use for risk adjustment and shared decision-making.'
+    if name=='Caprini VTE':
+        score=0
+        for item,pts in [('Age 41-60',1),('Age 61-74',2),('Age ≥75',3),('Minor surgery',1),('Major surgery >45 min',2),('BMI >25',1),('Swollen legs',1),('Varicose veins',1),('Pregnancy/postpartum',1),('History of malignancy',2),('Bed rest >72h',2),('Central venous access',2),('Prior DVT/PE',3),('Known thrombophilia',3),('Stroke <1 month',5),('Hip/pelvis/leg fracture',5),('Elective lower limb arthroplasty',5)]:
+            score += cb(item,pts)
+        risk='Low' if score<=2 else ('Medium' if score<=4 else 'High')
+        return score, 'VTE risk: 0-2 low, 3-4 moderate, ≥5 high.', risk
 
-    elif name == 'Clinical Frailty Scale':
-        val=st.slider('Frailty scale',1,9,3); result=val; risk='Low' if val<=3 else 'Medium' if val<=5 else 'High'; interp=f'CFS {val}: {risk} frailty risk.'; rec='High frailty needs geriatric/anesthetic optimization and realistic consent.'
+    if name=='RCRI':
+        score=sum(cb(x,1) for x in ['High-risk surgery','Ischemic heart disease','Heart failure','Cerebrovascular disease','Insulin-dependent diabetes','Creatinine >2 mg/dL'])
+        risk='Low' if score==0 else ('Medium' if score==1 else 'High')
+        return score, 'Cardiac risk increases with score.', risk
 
-    elif name == 'STOP-Bang':
-        score=sum(cb(x) for x in ['Snoring','Tiredness','Observed apnea','High blood pressure','BMI >35','Age >50','Neck circumference high','Male gender'])
-        result=score; risk='Low' if score<=2 else 'Medium' if score<=4 else 'High'; interp=f'STOP-Bang {score}: OSA risk {risk}.'; rec='Plan airway/postoperative monitoring if elevated.'
+    if name=='SIRS':
+        score=sum(cb(x,1) for x in ['Temp >38 or <36','HR >90','RR >20 or PaCO2 <32','WBC >12k, <4k, or bands >10%'])
+        risk='High' if score>=2 else 'Low'
+        return f'{score}/4', 'SIRS positive if ≥2.', risk
 
-    elif name == 'SIRS':
-        score=sum(cb(x) for x in ['Temp >38 or <36','HR >90','RR >20 or PaCO2 <32','WBC >12k, <4k, or bands >10%'])
-        result=f'{score}/4'; risk='High' if score>=2 else 'Low'; interp='SIRS positive.' if score>=2 else 'SIRS negative.'; rec='Search for infection/source control if clinically suspected.'
+    if name=='qSOFA':
+        score=sum(cb(x,1) for x in ['RR ≥22/min','Altered mentation','SBP ≤100 mmHg'])
+        risk='High' if score>=2 else 'Low'
+        return f'{score}/3', 'High risk in suspected infection if ≥2.', risk
 
-    elif name == 'qSOFA':
-        score=sum(cb(x) for x in ['RR ≥22','Altered mentation','SBP ≤100']); result=f'{score}/3'; risk='High' if score>=2 else 'Low'; interp='High risk poor outcome in suspected infection.' if score>=2 else 'Lower qSOFA risk.'; rec='Escalate sepsis management when ≥2.'
+    if name=='NEWS2':
+        rr=st.selectbox('Respiratory rate', ['12-20','9-11','21-24','≤8 or ≥25'])
+        spo2=st.selectbox('SpO2', ['≥96','94-95','92-93','≤91'])
+        sbp=st.selectbox('Systolic BP', ['111-219','101-110','91-100','≤90 or ≥220'])
+        pulse=st.selectbox('Pulse', ['51-90','41-50 or 91-110','111-130','≤40 or ≥131'])
+        consciousness=st.checkbox('New confusion / AVPU not alert')
+        temp=st.selectbox('Temperature', ['36.1-38.0','35.1-36.0 or 38.1-39.0','≤35.0 or ≥39.1'])
+        score={'12-20':0,'9-11':1,'21-24':2,'≤8 or ≥25':3}[rr]+{'≥96':0,'94-95':1,'92-93':2,'≤91':3}[spo2]+{'111-219':0,'101-110':1,'91-100':2,'≤90 or ≥220':3}[sbp]+{'51-90':0,'41-50 or 91-110':1,'111-130':2,'≤40 or ≥131':3}[pulse]+(3 if consciousness else 0)+{'36.1-38.0':0,'35.1-36.0 or 38.1-39.0':1,'≤35.0 or ≥39.1':3}[temp]
+        risk='Low' if score<=4 else ('Medium' if score<=6 else 'High')
+        return score, 'Early warning score for acute deterioration.', risk
 
-    elif name == 'NEWS2':
-        rr=st.selectbox('Respiratory rate score',[0,1,2,3]); spo2=st.selectbox('SpO2 score',[0,1,2,3]); o2=st.selectbox('Supplemental O2',[0,2]); temp=st.selectbox('Temperature score',[0,1,2,3]); sbp=st.selectbox('SBP score',[0,1,2,3]); hr=st.selectbox('Heart rate score',[0,1,2,3]); avpu=st.selectbox('Consciousness score',[0,3]); score=sum([rr,spo2,o2,temp,sbp,hr,avpu])
-        result=score; risk='Low' if score<=4 else 'Medium' if score<=6 else 'High'; interp=f'NEWS2 {score}: {risk} deterioration risk.'; rec='Escalate monitoring according to NEWS2 severity.'
+    if name=='Shock Index':
+        hr=st.number_input('Heart rate',20,250,90); sbp=st.number_input('Systolic BP',40,250,120)
+        val=round(hr/sbp,2); risk='Low' if val<0.7 else ('Medium' if val<=0.9 else 'High')
+        return val, 'HR/SBP. >0.9 suggests shock/physiologic stress.', risk
 
-    elif name == 'Shock Index':
-        hr=st.number_input('Heart rate',20,250,90); sbp=st.number_input('Systolic BP',40,250,120); val=round(hr/sbp,2); result=val; risk='Low' if val<0.7 else 'Medium' if val<=0.9 else 'High'; interp=f'Shock Index {val}: {risk} hemodynamic risk.'; rec='Assess bleeding, sepsis, dehydration, and resuscitation needs.'
+    if name=='SOFA Simplified':
+        score=0
+        score += st.selectbox('Respiration points', [0,1,2,3,4])
+        score += st.selectbox('Coagulation points', [0,1,2,3,4])
+        score += st.selectbox('Liver points', [0,1,2,3,4])
+        score += st.selectbox('Cardiovascular points', [0,1,2,3,4])
+        score += st.selectbox('CNS points', [0,1,2,3,4])
+        score += st.selectbox('Renal points', [0,1,2,3,4])
+        risk='Low' if score<=5 else ('Medium' if score<=10 else 'High')
+        return score, 'Simplified organ dysfunction sum. Use full SOFA in ICU.', risk
 
-    elif name == 'SOFA Simplified':
-        score=sum(st.selectbox(x,[0,1,2,3,4]) for x in ['Respiration','Coagulation','Liver','Cardiovascular','CNS','Renal'])
-        result=score; risk='Low' if score<2 else 'Medium' if score<8 else 'High'; interp=f'Simplified SOFA {score}: organ dysfunction burden.'; rec='Use trend and ICU context; this is simplified.'
+    if name=='Alvarado':
+        score=0
+        for item,pts in [('Migration pain',1),('Anorexia',1),('Nausea/vomiting',1),('RIF tenderness',2),('Rebound tenderness',1),('Fever',1),('Leukocytosis',2),('Neutrophilia',1)]: score+=cb(item,pts)
+        risk='Low' if score<=4 else ('Medium' if score<=6 else 'High')
+        return f'{score}/10', 'Appendicitis unlikely ≤4, possible 5-6, probable ≥7.', risk
 
-    elif name == 'Alvarado':
-        score=cb('Migration')+cb('Anorexia')+cb('Nausea/vomiting')+cb('RIF tenderness',2)+cb('Rebound')+cb('Fever')+cb('Leukocytosis',2)+cb('Neutrophilia')
-        result=f'{score}/10'; risk='Low' if score<=4 else 'Medium' if score<=6 else 'High'; interp=f'Alvarado {score}: {risk} appendicitis probability.'; rec='Use imaging/observation according to probability and patient factors.'
+    if name=='AIR Appendicitis':
+        score=0
+        score+=cb('Vomiting',1)
+        score+=st.selectbox('RIF tenderness points',[0,1,2,3])
+        score+=st.selectbox('Rebound/defense points',[0,1,2,3])
+        score+=cb('Temp ≥38.5',1)
+        score+=st.selectbox('WBC points',[0,1,2])
+        score+=st.selectbox('Neutrophils points',[0,1,2])
+        score+=st.selectbox('CRP points',[0,1,2])
+        risk='Low' if score<=4 else ('Medium' if score<=8 else 'High')
+        return f'{score}/12', 'AIR appendicitis probability.', risk
 
-    elif name == 'AIR Appendicitis':
-        score=cb('Vomiting')+st.selectbox('RIF tenderness',[0,1,2,3])+st.selectbox('Rebound/defense',[0,1,2,3])+cb('Temp ≥38.5')+st.selectbox('WBC score',[0,1,2])+st.selectbox('Neutrophil score',[0,1,2])+st.selectbox('CRP score',[0,1,2])
-        result=f'{score}/12'; risk='Low' if score<=4 else 'Medium' if score<=8 else 'High'; interp=f'AIR {score}: {risk} probability.'; rec='Intermediate/high risk usually needs imaging or surgical review.'
+    if name=='RIPASA':
+        score=0.0
+        for item,pts in [('Male',1),('Female',0.5),('Age <40',1),('RIF pain',0.5),('Migration to RIF',0.5),('Anorexia',1),('Nausea/vomiting',1),('Duration <48h',1),('RIF tenderness',1),('Guarding',2),('Rebound',1),('Rovsing sign',2),('Fever',1),('Raised WBC',1),('Negative urine analysis',1)]:
+            if st.checkbox(f'{item} (+{pts})'): score+=pts
+        risk='Low' if score<7.5 else 'High'
+        return score, 'RIPASA ≥7.5 supports appendicitis.', risk
 
-    elif name == 'RIPASA':
-        score=sum(st.checkbox(x)*1 for x in ['Male','Age <40','RIF pain','Migration','Anorexia','Nausea/vomiting','RIF tenderness','Guarding','Rebound','Fever','Raised WBC','Negative urine'])
-        result=score; risk='Low' if score<5 else 'Medium' if score<7.5 else 'High'; interp=f'RIPASA {score}: {risk} probability.'; rec='Apply local validation; useful adjunct in suspected appendicitis.'
+    if name=='Pediatric Appendicitis Score':
+        score=0
+        for item,pts in [('Anorexia',1),('Nausea/vomiting',1),('Migration pain',1),('Fever',1),('RIF tenderness',2),('Cough/percussion/hopping tenderness',2),('Leukocytosis',1),('Neutrophilia',1)]: score+=cb(item,pts)
+        risk='Low' if score<=3 else ('Medium' if score<=6 else 'High')
+        return f'{score}/10', 'Pediatric appendicitis probability.', risk
 
-    elif name == 'Pediatric Appendicitis Score':
-        score=cb('Migration')+cb('Anorexia')+cb('Nausea/vomiting')+cb('RIF tenderness',2)+cb('Cough/percussion/hopping pain',2)+cb('Fever')+cb('Leukocytosis')+cb('Neutrophilia')
-        result=f'{score}/10'; risk='Low' if score<=3 else 'Medium' if score<=6 else 'High'; interp=f'PAS {score}: {risk} probability.'; rec='Pediatric surgical assessment/imaging as appropriate.'
+    if name=='Tokyo Cholecystitis Grade':
+        organ=st.checkbox('Organ dysfunction')
+        moderate=any([st.checkbox('WBC >18,000'),st.checkbox('Palpable tender RUQ mass'),st.checkbox('Duration >72h'),st.checkbox('Marked local inflammation/gangrene/abscess/peritonitis')])
+        if organ: return 'Grade III','Severe acute cholecystitis.','High'
+        if moderate: return 'Grade II','Moderate acute cholecystitis.','Medium'
+        return 'Grade I','Mild acute cholecystitis.','Low'
 
-    elif name == 'Tokyo Cholecystitis Grade':
-        organ=st.checkbox('Organ dysfunction'); moderate=any([st.checkbox('WBC abnormal'),st.checkbox('Palpable RUQ mass'),st.checkbox('Duration >72h'),st.checkbox('Marked local inflammation')])
-        result='Grade III' if organ else 'Grade II' if moderate else 'Grade I'; risk='High' if organ else 'Medium' if moderate else 'Low'; interp=f'Tokyo acute cholecystitis {result}.'; rec='Select early surgery/drainage/antibiotics based on grade and fitness.'
+    if name=='Tokyo Cholangitis Grade':
+        organ=st.checkbox('Organ dysfunction')
+        moderate=sum(cb(x,1) for x in ['Age ≥75','High fever','WBC abnormal','Bilirubin ≥5 mg/dL','Hypoalbuminemia'])
+        if organ: return 'Grade III','Severe cholangitis.','High'
+        if moderate>=2: return 'Grade II','Moderate cholangitis.','Medium'
+        return 'Grade I','Mild cholangitis.','Low'
 
-    elif name == 'Tokyo Cholangitis Grade':
-        organ=st.checkbox('Organ dysfunction'); moderate=sum(st.checkbox(x) for x in ['WBC abnormal','Fever ≥39','Age ≥75','Bilirubin ≥5','Hypoalbuminemia'])>=2
-        result='Grade III' if organ else 'Grade II' if moderate else 'Grade I'; risk='High' if organ else 'Medium' if moderate else 'Low'; interp=f'Tokyo acute cholangitis {result}.'; rec='Antibiotics and biliary drainage urgency depend on grade.'
+    if name=='ASGE CBD Stone Risk':
+        high=any([st.checkbox('CBD stone on imaging'),st.checkbox('Ascending cholangitis'),st.checkbox('Bilirubin >4 mg/dL AND dilated CBD')])
+        inter=any([st.checkbox('Abnormal LFT'),st.checkbox('Age >55'),st.checkbox('Dilated CBD alone')])
+        if high: return 'High','High probability CBD stone; ERCP usually considered.','High'
+        if inter: return 'Intermediate','MRCP/EUS/IOC usually considered.','Medium'
+        return 'Low','Low probability CBD stone.','Low'
 
-    elif name == 'ASGE CBD Stone Risk':
-        high=st.checkbox('CBD stone on imaging') or st.checkbox('Ascending cholangitis') or st.checkbox('Bilirubin >4 + dilated CBD'); inter=st.checkbox('Abnormal LFTs / age >55 / dilated CBD')
-        result='High' if high else 'Intermediate' if inter else 'Low'; risk='High' if high else 'Medium' if inter else 'Low'; interp=f'ASGE CBD stone risk: {result}.'; rec='High: consider ERCP. Intermediate: MRCP/EUS/IOC. Low: cholecystectomy as indicated.'
+    if name in ['Nassar Difficulty Grade','Parkland Cholecystitis Grade','Csendes Mirizzi Classification','Hinchey Diverticulitis','WSES Diverticulitis Classification','Modified CT Severity Index','Atlanta Pancreatitis Classification','AAST Organ Injury Grade','CDC SSI Classification','Clavien-Dindo']:
+        options={
+        'Nassar Difficulty Grade':['Grade 1 Easy','Grade 2 Mild difficulty','Grade 3 Moderate difficulty','Grade 4 Severe difficulty','Grade 5 Extreme difficulty'],
+        'Parkland Cholecystitis Grade':['Grade 1 Normal','Grade 2 Minor adhesions','Grade 3 Hyperemia/fluid','Grade 4 Extensive adhesions/obscured','Grade 5 Perforation/necrosis/unable to visualize'],
+        'Csendes Mirizzi Classification':['Type I External compression','Type II fistula <1/3 CBD','Type III fistula 1/3-2/3 CBD','Type IV complete CBD destruction','Type V cholecystoenteric fistula'],
+        'Hinchey Diverticulitis':['Ia Phlegmon','Ib Pericolic abscess','II Pelvic/distant abscess','III Purulent peritonitis','IV Fecal peritonitis'],
+        'WSES Diverticulitis Classification':['0 Uncomplicated','1A Pericolic air/fluid','1B Abscess ≤4 cm','2A Abscess >4 cm','2B Distant air','3 Diffuse fluid no distant free air','4 Diffuse fluid with distant free air'],
+        'Modified CT Severity Index':['0-2 Mild','4-6 Moderate','8-10 Severe'],
+        'Atlanta Pancreatitis Classification':['Mild','Moderately severe','Severe persistent organ failure'],
+        'AAST Organ Injury Grade':['Grade I','Grade II','Grade III','Grade IV','Grade V'],
+        'CDC SSI Classification':['Superficial incisional SSI','Deep incisional SSI','Organ/space SSI'],
+        'Clavien-Dindo':['Grade I','Grade II','Grade IIIa','Grade IIIb','Grade IVa/b','Grade V']}
+        val=st.selectbox('Classification', options[name])
+        risk='Low' if any(x in val for x in ['1','I','Mild','Superficial','0']) else ('High' if any(x in val for x in ['4','5','IV','V','Severe','Organ']) else 'Medium')
+        return val, 'Classification selected.', risk
 
-    elif name in ['Nassar Difficulty Grade','Parkland Grade','Csendes Mirizzi','AAST Organ Injury Grade']:
-        grade=st.selectbox('Grade',[1,2,3,4,5]); result=f'Grade {grade}'; risk='Low' if grade<=2 else 'Medium' if grade==3 else 'High'; interp=f'{name}: Grade {grade}.'; rec='Higher grade suggests more complex operative strategy and senior support.'
+    if name=='BISAP':
+        score=sum(cb(x,1) for x in ['BUN >25 mg/dL','Impaired mental status','SIRS present','Age >60','Pleural effusion'])
+        risk='High' if score>=3 else 'Low'
+        return f'{score}/5','Acute pancreatitis severity.',risk
 
-    elif name == 'BISAP':
-        score=sum(cb(x) for x in ['BUN >25','Impaired mental status','SIRS','Age >60','Pleural effusion']); result=f'{score}/5'; risk='High' if score>=3 else 'Low'; interp=f'BISAP {score}: {risk} severity risk.'; rec='High risk needs close monitoring/ICU consideration.'
+    if name=='Ranson Admission':
+        score=sum(cb(x,1) for x in ['Age >55','WBC >16,000','Glucose >200','LDH >350','AST >250'])
+        risk='Low' if score<=2 else 'High'
+        return f'{score}/5','Admission criteria only.',risk
 
-    elif name == 'Ranson Admission':
-        score=sum(cb(x) for x in ['Age >55','WBC >16k','Glucose >200','LDH >350','AST >250']); result=f'{score}/5'; risk='Low' if score<=2 else 'High'; interp=f'Ranson admission {score}: {risk} severity risk.'; rec='Complete 48h criteria for full Ranson assessment.'
+    if name=='Glasgow-Imrie Pancreatitis':
+        score=sum(cb(x,1) for x in ['PaO2 <60','Age >55','Neutrophils/WBC >15k','Calcium <8 mg/dL','Urea >45 mg/dL','LDH >600','Albumin <3.2 g/dL','Glucose >180 mg/dL'])
+        risk='High' if score>=3 else 'Low'
+        return score,'Severe pancreatitis if ≥3.',risk
 
-    elif name == 'Glasgow-Imrie':
-        score=sum(cb(x) for x in ['Age >55','WBC >15k','Glucose >180','Urea >45','PaO2 <60','Calcium <8','Albumin <3.2','LDH >600','AST/ALT >200']); result=f'{score}/9'; risk='High' if score>=3 else 'Low'; interp=f'Glasgow-Imrie {score}: pancreatitis severity {risk}.'; rec='Score ≥3 suggests severe pancreatitis risk.'
+    if name=='Glasgow-Blatchford':
+        score=0
+        bun=st.number_input('BUN mg/dL',0.0,200.0,20.0); hb=st.number_input('Hemoglobin g/dL',0.0,25.0,12.0); sbp=st.number_input('SBP',40,250,120); pulse=st.number_input('Pulse',30,220,80)
+        if bun>=28: score+=2
+        if hb<12: score+=2
+        if sbp<100: score+=2
+        if pulse>=100: score+=1
+        score+=sum(cb(x,p) for x,p in [('Melena',1),('Syncope',2),('Liver disease',2),('Cardiac failure',2)])
+        risk='Low' if score==0 else ('Medium' if score<=5 else 'High')
+        return score,'Simplified GBS.',risk
 
-    elif name == 'Modified CTSI':
-        infl=st.selectbox('Pancreatic inflammation',[0,2,4]); nec=st.selectbox('Necrosis',[0,2,4]); extra=st.selectbox('Extrapancreatic complications',[0,2]); score=infl+nec+extra; result=f'{score}/10'; risk='Low' if score<=2 else 'Medium' if score<=6 else 'High'; interp=f'Modified CTSI {score}: {risk} radiologic severity.'; rec='Use with clinical course, organ failure, and collections.'
+    if name=='AIMS65':
+        score=sum(cb(x,1) for x in ['Albumin <3.0','INR >1.5','Altered mental status','SBP ≤90','Age >65'])
+        risk='Low' if score<=1 else ('Medium' if score==2 else 'High')
+        return f'{score}/5','Upper GI bleeding mortality risk.',risk
 
-    elif name == 'Atlanta Classification':
-        cls=st.selectbox('Atlanta severity',['Mild','Moderately severe','Severe']); result=cls; risk='Low' if cls=='Mild' else 'Medium' if cls=='Moderately severe' else 'High'; interp=f'Acute pancreatitis: {cls}.'; rec='Severe = persistent organ failure >48h; manage in high-acuity setting.'
+    if name=='Rockall Pre-Endoscopy':
+        score=0
+        score+=st.selectbox('Age points',[0,1,2])
+        score+=st.selectbox('Shock points',[0,1,2])
+        score+=st.selectbox('Comorbidity points',[0,2,3])
+        risk='Low' if score<=2 else ('Medium' if score<=4 else 'High')
+        return score,'Pre-endoscopy Rockall.',risk
 
-    elif name == 'Glasgow-Blatchford':
-        score=0; score+=st.selectbox('BUN score',[0,2,3,4,6]); score+=st.selectbox('Hemoglobin score',[0,1,3,6]); score+=st.selectbox('SBP score',[0,1,2,3]); score+=cb('Pulse ≥100'); score+=cb('Melena'); score+=cb('Syncope',2); score+=cb('Liver disease',2); score+=cb('Cardiac failure',2)
-        result=score; risk='Low' if score==0 else 'Medium' if score<=5 else 'High'; interp=f'GBS {score}: {risk} UGIB risk.'; rec='GBS 0 may be outpatient; higher scores usually need admission/endoscopy.'
+    if name=='Oakland Lower GI Bleeding':
+        age=st.number_input('Age',0,120,50); sex=st.selectbox('Sex',['Male','Female']); prev=st.checkbox('Previous LGIB admission'); pr=st.checkbox('PR blood'); hr=st.number_input('HR',30,220,80); sbp=st.number_input('SBP',40,250,120); hb=st.number_input('Hb g/dL',0.0,25.0,12.0)
+        score=(age//10)+(1 if sex=='Male' else 0)+(1 if prev else 0)+(1 if pr else 0)+(2 if hr>=100 else 0)+(2 if sbp<100 else 0)+(3 if hb<10 else 0)
+        risk='Low' if score<=8 else ('Medium' if score<=12 else 'High')
+        return score,'Simplified Oakland score; low score suggests safer discharge pathway.',risk
 
-    elif name == 'AIMS65':
-        score=sum(cb(x) for x in ['Albumin <3.0','INR >1.5','Altered mental status','SBP ≤90','Age >65']); result=f'{score}/5'; risk='Low' if score<=1 else 'Medium' if score==2 else 'High'; interp=f'AIMS65 {score}: mortality risk {risk}.'; rec='Escalate resuscitation and endoscopy planning if elevated.'
+    if name=='Mannheim Peritonitis Index':
+        score=0
+        for item,pts in [('Age >50',5),('Female sex',5),('Organ failure',7),('Malignancy',4),('Duration >24h',4),('Non-colonic origin',4),('Diffuse peritonitis',6),('Cloudy/purulent exudate',6),('Fecal exudate',12)]: score+=cb(item,pts)
+        risk='Low' if score<21 else ('Medium' if score<=29 else 'High')
+        return score,'Peritonitis mortality risk.',risk
 
-    elif name == 'Rockall Pre-Endoscopy':
-        score=st.selectbox('Age score',[0,1,2])+st.selectbox('Shock score',[0,1,2])+st.selectbox('Comorbidity score',[0,2,3]); result=score; risk='Low' if score<=2 else 'Medium' if score<=4 else 'High'; interp=f'Pre-endoscopy Rockall {score}: {risk} risk.'; rec='Use final Rockall after endoscopic diagnosis/stigmata.'
+    if name=='Boey Score':
+        score=sum(cb(x,1) for x in ['Major medical illness','Preoperative shock','Perforation >24h'])
+        risk='Low' if score<=1 else 'High'
+        return f'{score}/3','Perforated peptic ulcer risk.',risk
 
-    elif name == 'Oakland Lower GI Bleeding':
-        score=st.number_input('Oakland total score if calculated manually',0,40,8); result=score; risk='Low' if score<=8 else 'High'; status = 'possible safe discharge' if score <= 8 else 'admission/assessment usually needed'; interp=f'Oakland {score}: {status}.'; rec='Use local protocol and clinical judgment.'
+    if name=='Child-Pugh':
+        score={'None':1,'Mild':2,'Moderate/Severe':3}[st.selectbox('Ascites',['None','Mild','Moderate/Severe'])]+{'None':1,'Grade I-II':2,'Grade III-IV':3}[st.selectbox('Encephalopathy',['None','Grade I-II','Grade III-IV'])]+{'<2':1,'2-3':2,'>3':3}[st.selectbox('Bilirubin',['<2','2-3','>3'])]+{'>3.5':1,'2.8-3.5':2,'<2.8':3}[st.selectbox('Albumin',['>3.5','2.8-3.5','<2.8'])]+{'<1.7':1,'1.7-2.3':2,'>2.3':3}[st.selectbox('INR',['<1.7','1.7-2.3','>2.3'])]
+        cls='A' if score<=6 else ('B' if score<=9 else 'C'); risk='Low' if cls=='A' else ('Medium' if cls=='B' else 'High')
+        return f'{score} Class {cls}','Cirrhosis surgical risk aid.',risk
 
-    elif name == 'Mannheim Peritonitis Index':
-        items={'Age >50':5,'Female':5,'Organ failure':7,'Malignancy':4,'Duration >24h':4,'Non-colonic origin':4,'Diffuse peritonitis':6,'Cloudy/purulent exudate':6,'Fecal exudate':12}
-        score=sum(cb(k,v) for k,v in items.items()); result=score; risk='Low' if score<21 else 'Medium' if score<=29 else 'High'; interp=f'MPI {score}: {risk} mortality risk.'; rec='High score supports aggressive resuscitation/source control/ICU planning.'
+    if name=='MELD-Na':
+        bili=max(st.number_input('Bilirubin',0.1,50.0,1.0),1.0); inr=max(st.number_input('INR',0.8,10.0,1.0),1.0); cr=max(st.number_input('Creatinine',0.1,15.0,1.0),1.0); na=st.number_input('Sodium',120,150,137)
+        meld=round(3.78*math.log(bili)+11.2*math.log(inr)+9.57*math.log(cr)+6.43); nac=min(max(na,125),137); meldna=round(meld+1.32*(137-nac)-0.033*meld*(137-nac))
+        risk='Low' if meldna<10 else ('Medium' if meldna<20 else 'High')
+        return meldna,'MELD-Na estimate.',risk
 
-    elif name == 'Boey Score':
-        score=sum(cb(x) for x in ['Major medical illness','Preoperative shock','Perforation >24h']); result=f'{score}/3'; risk='Low' if score<=1 else 'High'; interp=f'Boey {score}: perforated peptic ulcer risk {risk}.'; rec='Optimize resuscitation and counsel risk.'
+    if name=='ALBI Grade':
+        alb=st.number_input('Albumin g/L',10.0,60.0,35.0); bili=st.number_input('Bilirubin µmol/L',1.0,700.0,20.0)
+        val=round((math.log10(bili)*0.66)+(alb*-0.085),2)
+        grade='Grade 1' if val<=-2.60 else ('Grade 2' if val<=-1.39 else 'Grade 3'); risk='Low' if grade=='Grade 1' else ('Medium' if grade=='Grade 2' else 'High')
+        return f'{val} / {grade}','Liver function score.',risk
 
-    elif name == 'Child-Pugh':
-        score=sum([st.selectbox('Ascites',[1,2,3]),st.selectbox('Encephalopathy',[1,2,3]),st.selectbox('Bilirubin',[1,2,3]),st.selectbox('Albumin',[1,2,3]),st.selectbox('INR/PT',[1,2,3])]); cls='A' if score<=6 else 'B' if score<=9 else 'C'; result=f'{score} Class {cls}'; risk='Low' if cls=='A' else 'Medium' if cls=='B' else 'High'; interp=f'Child-Pugh {result}.'; rec='Higher class increases operative risk; optimize liver status.'
+    if name=='LARS Score':
+        score=0
+        score+=st.selectbox('Incontinence for flatus',[0,4,7])
+        score+=st.selectbox('Incontinence for liquid stool',[0,3,3])
+        score+=st.selectbox('Frequency',[0,4,5])
+        score+=st.selectbox('Clustering',[0,9,11])
+        score+=st.selectbox('Urgency',[0,11,16])
+        risk='Low' if score<=20 else ('Medium' if score<=29 else 'High')
+        return score,'Low anterior resection syndrome severity.',risk
 
-    elif name == 'MELD-Na':
-        bili=max(st.number_input('Bilirubin',0.1,50.0,1.0),1.0); inr=max(st.number_input('INR',0.8,10.0,1.0),1.0); cr=max(st.number_input('Creatinine',0.1,15.0,1.0),1.0); na=st.number_input('Sodium',120,150,137); meld=round(3.78*math.log(bili)+11.2*math.log(inr)+9.57*math.log(cr)+6.43); nac=min(max(na,125),137); val=round(meld+1.32*(137-nac)-0.033*meld*(137-nac)); result=val; risk='Low' if val<10 else 'Medium' if val<20 else 'High'; interp=f'MELD-Na {val}: {risk} liver mortality risk.'; rec='Use validated transplant/hepatology context.'
+    if name=='Wexner Incontinence Score':
+        score=sum(st.selectbox(x,[0,1,2,3,4]) for x in ['Solid stool','Liquid stool','Gas','Pad use','Lifestyle alteration'])
+        risk='Low' if score<=7 else ('Medium' if score<=14 else 'High')
+        return f'{score}/20','Fecal incontinence severity.',risk
 
-    elif name == 'ALBI Grade':
-        alb=st.number_input('Albumin g/L',10.0,60.0,35.0); bili=st.number_input('Bilirubin µmol/L',1.0,600.0,20.0); val=round((math.log10(bili)*0.66)+(alb*-0.085),2); grade='1' if val<=-2.60 else '2' if val<=-1.39 else '3'; result=f'{val} Grade {grade}'; risk='Low' if grade=='1' else 'Medium' if grade=='2' else 'High'; interp=f'ALBI {result}.'; rec='Useful in HCC/liver reserve assessment.'
+    if name=='GCS':
+        e=st.selectbox('Eye',[4,3,2,1]); v=st.selectbox('Verbal',[5,4,3,2,1]); m=st.selectbox('Motor',[6,5,4,3,2,1]); score=e+v+m
+        risk='Low' if score>=13 else ('Medium' if score>=9 else 'High')
+        return f'{score}/15','Consciousness level.',risk
 
-    elif name in ['Hinchey Diverticulitis','WSES Diverticulitis']:
-        stage=st.selectbox('Stage/Grade',['Ia','Ib','II','III','IV']); result=stage; risk='Low' if stage in ['Ia','Ib'] else 'Medium' if stage=='II' else 'High'; interp=f'{name}: {stage}.'; rec='Higher stage suggests drainage/surgery depending on stability and contamination.'
+    if name=='RTS':
+        gcs=st.selectbox('GCS coded',[4,3,2,1,0]); sbp=st.selectbox('SBP coded',[4,3,2,1,0]); rr=st.selectbox('RR coded',[4,3,2,1,0]); val=round(0.9368*gcs+0.7326*sbp+0.2908*rr,2)
+        risk='Low' if val>6 else ('Medium' if val>4 else 'High')
+        return val,'Revised Trauma Score.',risk
 
-    elif name == 'LARS Score':
-        score=st.number_input('LARS score',0,42,0); result=score; risk='Low' if score<=20 else 'Medium' if score<=29 else 'High'; interp='No/minor LARS' if score<=20 else 'Minor LARS' if score<=29 else 'Major LARS'; rec='Consider bowel rehabilitation and colorectal follow-up if high.'
-
-    elif name == 'Wexner Incontinence Score':
-        score=sum(st.selectbox(x,[0,1,2,3,4]) for x in ['Solid','Liquid','Gas','Pad use','Lifestyle alteration']); result=f'{score}/20'; risk='Low' if score<=4 else 'Medium' if score<=12 else 'High'; interp=f'Wexner {score}: {risk} incontinence severity.'; rec='Guide pelvic floor workup and treatment.'
-
-    elif name == 'GCS':
-        e=st.selectbox('Eye',[1,2,3,4],index=3); v=st.selectbox('Verbal',[1,2,3,4,5],index=4); m=st.selectbox('Motor',[1,2,3,4,5,6],index=5); score=e+v+m; result=f'{score}/15'; risk='Low' if score>=13 else 'Medium' if score>=9 else 'High'; interp=f'GCS {score}: {risk} head injury severity.'; rec='Protect airway and image/escalate according to trauma protocol.'
-
-    elif name == 'RTS':
-        gcs=st.selectbox('GCS coded',[0,1,2,3,4]); sbp=st.selectbox('SBP coded',[0,1,2,3,4]); rr=st.selectbox('RR coded',[0,1,2,3,4]); val=round(0.9368*gcs+0.7326*sbp+0.2908*rr,2); result=val; risk='High' if val<4 else 'Medium' if val<6 else 'Low'; interp=f'RTS {val}: trauma physiologic risk.'; rec='Use for triage, not isolated disposition.'
-
-    elif name == 'Clavien-Dindo':
-        grade=st.selectbox('Grade',['I','II','IIIa','IIIb','IV','V']); result=f'Grade {grade}'; risk='Low' if grade in ['I','II'] else 'Medium' if grade=='IIIa' else 'High'; interp=f'Clavien-Dindo Grade {grade}.'; rec='Document postoperative complication severity consistently.'
-
-    elif name == 'CDC SSI Classification':
-        cls=st.selectbox('SSI type',['Superficial incisional','Deep incisional','Organ/space']); result=cls; risk='Medium' if cls!='Organ/space' else 'High'; interp=f'CDC SSI classification: {cls}.'; rec='Treat according to depth/source control and culture when needed.'
-
-    else:
-        st.warning('Score not implemented yet.'); result='N/A'; interp='Pending implementation.'; rec=''; risk='Low'
-
-    return result, interp, rec, risk
+    return 'N/A','Score renderer not implemented yet.','Medium'
