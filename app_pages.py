@@ -60,6 +60,9 @@ from operations_catalog import (
     suggested_scores,
 )
 from scores import ALL_SCORES, SCORE_CATEGORIES, render_score
+from ui_components import calculate_pod, empty_state, page_heading, patient_context_banner, status_badge, workflow_stepper
+from database import patient_snapshot
+from navigation import PATIENTS, SURGICAL_JOURNEY, navigate
 
 
 
@@ -203,43 +206,71 @@ def _create_case_from_form(values: dict[str, Any], user: UserContext) -> int:
 
 
 def page_calendar(user: UserContext):
-    st.markdown("## التقويم الشهري للعمليات Monthly theatre calendar")
+    page_heading(
+        "قائمة وتقويم العمليات",
+        "Theatre schedule",
+        "عرض شهري أو قائمة تشغيلية لعمليات اليوم والأسبوع مع الوصول المباشر لمسار الحالة.",
+    )
     today = date.today()
-    c1, c2, c3 = st.columns([1, 1, 2])
-    month = c1.selectbox("Month", list(range(1, 13)), index=today.month - 1)
-    year = int(c2.number_input("Year", 2024, 2100, today.year))
-    c3.info("كل يوم يعرض عدد الحالات حسب المرحلة. اضغط على تفاصيل اليوم لمراجعة القائمة.")
+    top1, top2, top3 = st.columns([1, 1, 2])
+    month = top1.selectbox("Month", list(range(1, 13)), index=today.month - 1)
+    year = int(top2.number_input("Year", 2024, 2100, today.year))
+    view_mode = top3.segmented_control("View", ["Calendar", "List"], default="Calendar")
 
     rows = operations_for_month(year, int(month))
-    by_day: dict[str, list[dict]] = defaultdict(list)
-    for op in rows:
-        by_day[str(op["operation_date"])].append(op)
+    if view_mode == "List":
+        if not rows:
+            empty_state("No operations", "No cases are scheduled for the selected month.", "OR")
+        else:
+            frame = pd.DataFrame(rows)
+            c1, c2, c3 = st.columns(3)
+            status_filter = c1.selectbox("Status", ["All"] + sorted(frame["status"].dropna().unique().tolist()))
+            surgeon_filter = c2.selectbox("Surgeon", ["All"] + sorted(frame["surgeon"].dropna().unique().tolist()))
+            urgency_filter = c3.selectbox("Urgency", ["All"] + sorted(frame["urgency"].dropna().unique().tolist()))
+            filtered = rows
+            if status_filter != "All": filtered = [x for x in filtered if x["status"] == status_filter]
+            if surgeon_filter != "All": filtered = [x for x in filtered if x["surgeon"] == surgeon_filter]
+            if urgency_filter != "All": filtered = [x for x in filtered if x["urgency"] == urgency_filter]
+            for op in filtered:
+                with st.container(border=True):
+                    a, b, c = st.columns([5, 2, 1])
+                    a.markdown(f"**{op['operation_date']} {op.get('start_time') or ''} · {op['patient_name']}**  \n{op['operation_name']} · {op['surgeon']} · OR {op.get('or_room') or 'TBC'}")
+                    b.markdown(status_badge(op["status"]), unsafe_allow_html=True)
+                    if c.button("Open", key=f"theatre_list_open_{op['id']}"):
+                        navigate(SURGICAL_JOURNEY, patient_id=int(op["patient_id"]), operation_id=int(op["id"]))
+    else:
+        by_day: dict[str, list[dict]] = defaultdict(list)
+        for op in rows:
+            by_day[str(op["operation_date"])].append(op)
 
-    header = st.columns(7)
-    for i, day_name in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]):
-        header[i].markdown(f"**{day_name}**")
+        header = st.columns(7)
+        for i, day_name in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]):
+            header[i].markdown(f"<div class='calendar-header'>{day_name}</div>", unsafe_allow_html=True)
 
-    for week in calendar.monthcalendar(year, int(month)):
-        cols = st.columns(7)
-        for idx, day in enumerate(week):
-            with cols[idx]:
-                if day == 0:
-                    st.write("")
-                    continue
-                ds = f"{year:04d}-{int(month):02d}-{day:02d}"
-                day_ops = by_day.get(ds, [])
-                st.markdown('<div class="day-card">', unsafe_allow_html=True)
-                st.markdown(f"### {day}")
-                if day_ops:
-                    counts = Counter(op["status"] for op in day_ops)
-                    for status, count in counts.items():
-                        st.markdown(f"<span class='pill {_status_css(status)}'>{status}: {count}</span>", unsafe_allow_html=True)
-                    with st.expander(f"Cases ({len(day_ops)})"):
-                        for op in day_ops:
-                            st.caption(f"{op.get('start_time') or ''} · {op['patient_name']} · {op['operation_name']} · {op['surgeon']}")
-                else:
-                    st.caption("No cases")
-                st.markdown("</div>", unsafe_allow_html=True)
+        for week in calendar.monthcalendar(year, int(month)):
+            cols = st.columns(7)
+            for idx, day in enumerate(week):
+                with cols[idx]:
+                    if day == 0:
+                        st.write("")
+                        continue
+                    ds = f"{year:04d}-{int(month):02d}-{day:02d}"
+                    day_ops = by_day.get(ds, [])
+                    today_class = "today-cell" if ds == today.isoformat() else ""
+                    st.markdown(f'<div class="calendar-cell {today_class}"><div class="date-number">{day}</div>', unsafe_allow_html=True)
+                    if day_ops:
+                        counts = Counter(op["status"] for op in day_ops)
+                        for status, count in counts.items():
+                            st.markdown(f"<div class='calendar-count theatre-count'>{status}: {count}</div>", unsafe_allow_html=True)
+                        with st.popover(f"Cases ({len(day_ops)})"):
+                            for op in day_ops:
+                                st.write(f"**{op.get('start_time') or ''} · {op['patient_name']}**")
+                                st.caption(f"{op['operation_name']} · {op['surgeon']} · {op['status']}")
+                                if st.button("Open pathway", key=f"calendar_open_{op['id']}", width="stretch"):
+                                    navigate(SURGICAL_JOURNEY, patient_id=int(op["patient_id"]), operation_id=int(op["id"]))
+                    else:
+                        st.caption("—")
+                    st.markdown("</div>", unsafe_allow_html=True)
 
     if can(user, "write"):
         with st.expander("➕ إضافة عملية مباشرة Quick add", expanded=False):
@@ -271,9 +302,9 @@ def page_calendar(user: UserContext):
                             },
                             user,
                         )
+                        st.session_state["selected_operation_id"] = int(op_id)
                         st.success(f"Saved operation #{op_id}")
                         st.rerun()
-
 
 def page_new_case(user: UserContext):
     require(user, "write")
@@ -350,28 +381,107 @@ def page_new_case(user: UserContext):
 
 
 def page_ward_board(user: UserContext):
-    st.markdown("## لوحة القسم Surgical ward board")
-    ops = [x for x in get_operations() if x["status"] not in {"Discharged", "Cancelled"}]
+    page_heading(
+        "لوحة الردهة الجراحية",
+        "Surgical ward board",
+        "عرض عملي للحالات الراقدة، NEWS2، استحقاق العلامات الحيوية، والجولة التالية.",
+    )
+    ops = [x for x in get_operations() if x["status"] not in {"Discharged", "Cancelled", "Closed"}]
     if not ops:
-        st.info("No active inpatients/cases.")
+        empty_state("No active inpatients", "No current surgical ward or peri-operative episode was found.", "▦")
         return
+
     rows = []
     for op in ops:
         vitals = list_vitals(op["id"])
         last = vitals[0] if vitals else None
         due_status, due_detail = _observation_due_status(last)
         rows.append({
-            "ID": op["id"], "MRN": op["mrn"], "Patient": op["patient_name"], "Ward/Bed": f"{op.get('ward') or ''}/{op.get('bed') or ''}",
-            "Procedure": op["operation_name"], "Status": op["status"], "Last NEWS2": last["news2"] if last else None,
-            "Last vitals": last["observed_at"] if last else "Not recorded", "Observation status": due_status,
-            "Next observation": due_detail, "Escalation": last["escalation"] if last else "",
+            "ID": op["id"],
+            "Patient ID": op["patient_id"],
+            "MRN": op["mrn"],
+            "Patient": op["patient_name"],
+            "Ward": op.get("ward") or "Unassigned",
+            "Bed": op.get("bed") or "—",
+            "POD": calculate_pod(op.get("operation_date")),
+            "Procedure": op["operation_name"],
+            "Status": op["status"],
+            "NEWS2": last["news2"] if last else None,
+            "Pain": last.get("pain_score") if last else None,
+            "Last observations": last["observed_at"] if last else "Not recorded",
+            "Observation status": due_status,
+            "Next observation": due_detail,
+            "Escalation": last["escalation"] if last else "No observations recorded",
         })
-    df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True, hide_index=True)
-    if df["Last NEWS2"].notna().any():
-        fig = px.histogram(df.dropna(subset=["Last NEWS2"]), x="Last NEWS2", title="Current NEWS2 distribution")
-        st.plotly_chart(fig, use_container_width=True)
+    frame = pd.DataFrame(rows)
 
+    f1, f2, f3 = st.columns(3)
+    ward_filter = f1.selectbox("Ward", ["All"] + sorted(frame["Ward"].dropna().unique().tolist()))
+    status_filter = f2.selectbox("Pathway status", ["All"] + sorted(frame["Status"].dropna().unique().tolist()))
+    observation_filter = f3.selectbox("Observation status", ["All", "Overdue", "Continuous", "Due", "Review"])
+    filtered = frame.copy()
+    if ward_filter != "All":
+        filtered = filtered[filtered["Ward"] == ward_filter]
+    if status_filter != "All":
+        filtered = filtered[filtered["Status"] == status_filter]
+    if observation_filter != "All":
+        filtered = filtered[filtered["Observation status"] == observation_filter]
+
+    metrics = st.columns(5)
+    metrics[0].metric("Patients", len(filtered))
+    metrics[1].metric("Overdue observations", int((filtered["Observation status"] == "Overdue").sum()))
+    metrics[2].metric("NEWS2 ≥5", int((pd.to_numeric(filtered["NEWS2"], errors="coerce") >= 5).sum()))
+    metrics[3].metric("In theatre/PACU", int(filtered["Status"].isin(["In theatre", "PACU/Recovery"]).sum()))
+    metrics[4].metric("Post-op ward", int((filtered["Status"] == "Post-op ward").sum()))
+
+    display_columns = ["Ward", "Bed", "Patient", "MRN", "POD", "Procedure", "Status", "NEWS2", "Pain", "Observation status", "Next observation"]
+    st.dataframe(
+        filtered[display_columns],
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "NEWS2": st.column_config.NumberColumn("NEWS2", format="%d"),
+            "Pain": st.column_config.NumberColumn("Pain", format="%d/10"),
+        },
+    )
+
+    st.markdown("### Patient workspace")
+    operation_map = {
+        f"{row['Ward']}/{row['Bed']} · {row['Patient']} · {row['Procedure']}": int(row["ID"])
+        for _, row in filtered.iterrows()
+    }
+    if not operation_map:
+        st.info("No patient matches the selected filters.")
+        return
+    selected_label = st.selectbox("Select ward patient", list(operation_map.keys()), key="ward_patient_selector")
+    operation_id = operation_map[selected_label]
+    operation = get_operation(operation_id)
+    snapshot = patient_snapshot(int(operation["patient"]["id"]))
+    patient_context_banner(snapshot)
+    workflow_stepper(operation.get("status") or "Decision", compact=True)
+
+    latest_vitals = list_vitals(operation_id)
+    last = latest_vitals[0] if latest_vitals else None
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("NEWS2", last["news2"] if last else "—")
+    c2.metric("Pain", f"{last.get('pain_score')}/10" if last and last.get("pain_score") is not None else "—")
+    c3.metric("POD", calculate_pod(operation.get("operation_date")) if calculate_pod(operation.get("operation_date")) is not None else "—")
+    due_status, due_detail = _observation_due_status(last)
+    c4.metric("Observations", due_status, due_detail)
+
+    a1, a2 = st.columns(2)
+    if a1.button("Open full patient chart", width="stretch"):
+        navigate(PATIENTS, patient_id=int(operation["patient"]["id"]))
+    if a2.button("Open surgical journey", type="primary", width="stretch"):
+        navigate(SURGICAL_JOURNEY, patient_id=int(operation["patient"]["id"]), operation_id=operation_id)
+
+    with st.expander("Quick observations / العلامات الحيوية", expanded=user.role == "nurse"):
+        _render_vitals(operation_id, user)
+
+    if frame["NEWS2"].notna().any():
+        with st.expander("NEWS2 distribution"):
+            fig = px.histogram(frame.dropna(subset=["NEWS2"]), x="NEWS2", title="Current NEWS2 distribution")
+            st.plotly_chart(fig, width="stretch")
 
 def _render_task_phase(op_id: int, phase: str, user: UserContext):
     tasks = list_tasks(op_id, phase)
@@ -455,7 +565,7 @@ def _render_intraop(op_id: int, user: UserContext):
             st.success("Intraoperative note saved")
     records = list_clinical_records(op_id, "intraoperative_note")
     if records:
-        st.dataframe(pd.DataFrame([{"created_at": r["created_at"], "entered_by": r["entered_by"], **r["payload"]} for r in records]), use_container_width=True)
+        st.dataframe(pd.DataFrame([{"created_at": r["created_at"], "entered_by": r["entered_by"], **r["payload"]} for r in records]), width="stretch")
 
 
 def _render_pacu(op_id: int, user: UserContext):
@@ -482,7 +592,7 @@ def _render_pacu(op_id: int, user: UserContext):
             st.success("Handoff saved")
     records = list_clinical_records(op_id, "pacu_handoff")
     if records:
-        st.dataframe(pd.DataFrame([{"created_at": r["created_at"], "entered_by": r["entered_by"], **r["payload"]} for r in records]), use_container_width=True)
+        st.dataframe(pd.DataFrame([{"created_at": r["created_at"], "entered_by": r["entered_by"], **r["payload"]} for r in records]), width="stretch")
 
 
 def _render_vitals(op_id: int, user: UserContext):
@@ -519,10 +629,10 @@ def _render_vitals(op_id: int, user: UserContext):
     vitals = list_vitals(op_id)
     if vitals:
         df = pd.DataFrame(vitals)
-        st.dataframe(df[["observed_at", "shift", "respiratory_rate", "spo2", "supplemental_oxygen", "systolic_bp", "diastolic_bp", "pulse", "temperature", "consciousness", "pain_score", "news2", "escalation", "entered_by"]], use_container_width=True, hide_index=True)
+        st.dataframe(df[["observed_at", "shift", "respiratory_rate", "spo2", "supplemental_oxygen", "systolic_bp", "diastolic_bp", "pulse", "temperature", "consciousness", "pain_score", "news2", "escalation", "entered_by"]], width="stretch", hide_index=True)
         trend = df.sort_values("observed_at")
         fig = px.line(trend, x="observed_at", y="news2", markers=True, title="NEWS2 trend")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 
 def _render_ward_rounds(op_id: int, op: dict, user: UserContext):
@@ -562,7 +672,7 @@ def _render_ward_rounds(op_id: int, op: dict, user: UserContext):
         table = []
         for r in rounds:
             table.append({"date": r["round_date"], "shift": r["shift"], "POD": r["post_op_day"], "entered_by": r["entered_by"], **r["payload"]})
-        st.dataframe(pd.DataFrame(table), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(table), width="stretch", hide_index=True)
 
 
 def _render_scores(op_id: int, op: dict, user: UserContext):
@@ -586,7 +696,7 @@ def _render_scores(op_id: int, op: dict, user: UserContext):
         st.success("Score saved")
         st.rerun()
     if completed:
-        st.dataframe(pd.DataFrame(completed)[["created_at", "score_name", "result", "risk", "interpretation", "completed_by"]], use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(completed)[["created_at", "score_name", "result", "risk", "interpretation", "completed_by"]], width="stretch", hide_index=True)
 
 
 def _render_attachments(op_id: int, user: UserContext):
@@ -677,22 +787,34 @@ def _render_followup(op_id: int, op: dict, user: UserContext):
     records = list_clinical_records(op_id, "post_discharge_followup")
     if records:
         table = [{"created_at": r["created_at"], "entered_by": r["entered_by"], **r["payload"]} for r in records]
-        st.dataframe(pd.DataFrame(table), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(table), width="stretch", hide_index=True)
 
 def page_patient_journey(user: UserContext):
-    st.markdown("## مسار المريض Surgical patient journey")
+    page_heading(
+        "مسار المريض الجراحي",
+        "Surgical patient journey",
+        "مسار موحد من القرار والتحضير إلى العملية والردهة والخروج والمتابعة.",
+    )
     ops = get_operations(include_archived=True)
     if not ops:
-        st.info("Add a surgical case first.")
+        empty_state("No surgical cases", "Add a surgical case first.", "OR")
         return
-    op_id = st.selectbox("Select case", [x["id"] for x in ops], format_func=_operation_label)
+    option_ids = [int(x["id"]) for x in ops]
+    requested_id = st.session_state.get("selected_operation_id")
+    default_index = option_ids.index(int(requested_id)) if requested_id and int(requested_id) in option_ids else 0
+    op_id = st.selectbox("Select case", option_ids, index=default_index, format_func=_operation_label)
+    st.session_state["selected_operation_id"] = int(op_id)
     op = get_operation(op_id)
     patient = op["patient"]
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.write(f"### {patient['full_name']} · MRN {patient['mrn']}")
-    st.write(f"**{op['operation_name']}** · {op['operation_date']} {op.get('start_time') or ''} · {op['urgency']} · {op['status']}")
-    st.caption(f"Diagnosis: {op['diagnosis']} | Surgeon: {op['surgeon']} | Ward/Bed: {op.get('ward') or '-'} / {op.get('bed') or '-'} | Allergies: {patient.get('allergies') or 'Not recorded'}")
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.session_state["selected_patient_id"] = int(patient["id"])
+    patient_context_banner(patient_snapshot(int(patient["id"])))
+    workflow_stepper(op.get("status") or "Decision")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Procedure", op["operation_name"])
+    c2.metric("Date", str(op["operation_date"]))
+    c3.metric("Surgeon", op["surgeon"])
+    c4.metric("Ward / Bed", f"{op.get('ward') or '—'} / {op.get('bed') or '—'}")
+    st.caption(f"Diagnosis: {op['diagnosis']} · Urgency: {op['urgency']} · Current status: {op['status']}")
 
     preop_ready = _tasks_complete(op_id, "Pre-op")
     sign_in_ready = _checklist_phase_complete(op_id, "Sign-in")
@@ -744,7 +866,7 @@ def page_patient_journey(user: UserContext):
         _safe_json_download(bundle, f"operation_{op_id}_fhir_bundle.json", "Download FHIR-style Bundle")
         st.warning("FHIR export requires profiling and conformance testing against the receiving EHR before live integration.")
         logs = [x for x in get_audit_logs(limit=500) if str(x.get("entity_id")) == str(op_id) or x.get("entity_type") in {"vital_sign", "score_result", "ward_round", "attachment", "intraoperative_note", "pacu_handoff", "discharge_summary"}]
-        st.dataframe(pd.DataFrame(logs), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(logs), width="stretch", hide_index=True)
 
 
 def page_score_library(user: UserContext):
@@ -796,7 +918,7 @@ def page_quality(user: UserContext):
 
     status_df = pd.DataFrame([{"Status": k, "Cases": v} for k, v in statuses.items()])
     if not status_df.empty:
-        st.plotly_chart(px.bar(status_df, x="Status", y="Cases", title="Case status"), use_container_width=True)
+        st.plotly_chart(px.bar(status_df, x="Status", y="Cases", title="Case status"), width="stretch")
 
     compliance_rows = []
     for op in ops:
@@ -810,11 +932,11 @@ def page_quality(user: UserContext):
             "Time-out complete": _checklist_phase_complete(op["id"], "Time-out"),
             "Post-discharge follow-up": bool(followups),
         })
-    st.dataframe(pd.DataFrame(compliance_rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(compliance_rows), width="stretch", hide_index=True)
 
     if can(user, "admin"):
         st.markdown("### Audit log")
-        st.dataframe(pd.DataFrame(get_audit_logs(limit=500)), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(get_audit_logs(limit=500)), width="stretch", hide_index=True)
 
 
 def page_admin(user: UserContext):

@@ -78,6 +78,8 @@ from operations_catalog import (
     suggested_scores,
 )
 from reports import prescription_html
+from ui_components import page_heading, patient_context_banner
+from database import patient_snapshot
 
 
 def _hospital_name() -> str:
@@ -91,6 +93,16 @@ def _patients_map() -> tuple[list[dict[str, Any]], dict[str, int]]:
     patients = list_patients()
     labels = {f"{p['mrn']} · {p['full_name']}": int(p["id"]) for p in patients}
     return patients, labels
+
+
+def _default_patient_index(labels: dict[str, int]) -> int:
+    selected_id = st.session_state.get("selected_patient_id")
+    if selected_id is None:
+        return 0
+    for index, label in enumerate(labels.keys()):
+        if int(labels[label]) == int(selected_id):
+            return index
+    return 0
 
 
 def _status_class(status: str) -> str:
@@ -248,7 +260,7 @@ def page_command_center(user: UserContext) -> None:
             else:
                 with st.form("quick_appointment", clear_on_submit=True):
                     c1, c2, c3 = st.columns(3)
-                    label = c1.selectbox("Patient", list(pmap.keys()))
+                    label = c1.selectbox("Patient", list(pmap.keys()), index=_default_patient_index(pmap))
                     appt_date = c1.date_input("Date", today)
                     start_time = c1.time_input("Start", time(9, 0))
                     appt_type = c2.selectbox("Type", APPOINTMENT_TYPES)
@@ -293,8 +305,9 @@ def page_patients(user: UserContext) -> None:
             return
         selected = st.selectbox("Select patient", list(pmap.keys()), key="chart_patient")
         patient_id = pmap[selected]
+        st.session_state["selected_patient_id"] = int(patient_id)
         patient = get_patient(patient_id)
-        _patient_banner(patient)
+        patient_context_banner(patient_snapshot(patient_id))
 
         overview, problems_tab, meds_tab, tests_tab, files_tab = st.tabs(["Timeline", "Problems & allergies", "Medications", "Investigations", "Files"])
         with overview:
@@ -359,10 +372,10 @@ def page_patients(user: UserContext) -> None:
             requests = list_service_requests(patient_id=patient_id)
             results = list_results(patient_id=patient_id)
             st.markdown("#### Requests")
-            if requests: st.dataframe(pd.DataFrame(requests).drop(columns=[c for c in ["updated_at"] if c in pd.DataFrame(requests).columns]), use_container_width=True, hide_index=True)
+            if requests: st.dataframe(pd.DataFrame(requests).drop(columns=[c for c in ["updated_at"] if c in pd.DataFrame(requests).columns]), width="stretch", hide_index=True)
             else: st.info("No requests.")
             st.markdown("#### Results")
-            if results: st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+            if results: st.dataframe(pd.DataFrame(results), width="stretch", hide_index=True)
             else: st.info("No results.")
 
         with files_tab:
@@ -384,7 +397,7 @@ def page_patients(user: UserContext) -> None:
 
 
 def page_clinic(user: UserContext) -> None:
-    st.markdown("## العيادة Clinic workflow")
+    page_heading("مسار العيادة", "Clinic workflow", "قائمة الانتظار، المواعيد، والزيارة السريرية المنظمة ضمن سياق المريض.")
     today = date.today()
     queue_tab, appointments_tab, encounter_tab = st.tabs(["Today's queue", "Appointments", "Clinical encounter"])
 
@@ -409,7 +422,7 @@ def page_clinic(user: UserContext) -> None:
         elif can(user, "write"):
             with st.form("new_appointment_full", clear_on_submit=True):
                 c1, c2, c3 = st.columns(3)
-                label = c1.selectbox("Patient", list(pmap.keys()), key="appt_patient")
+                label = c1.selectbox("Patient", list(pmap.keys()), index=_default_patient_index(pmap), key="appt_patient")
                 appt_date = c1.date_input("Date", today, key="appt_date")
                 start_time = c1.time_input("Start time", time(9, 0), key="appt_time")
                 appt_type = c2.selectbox("Appointment type", APPOINTMENT_TYPES, key="appt_type")
@@ -424,7 +437,7 @@ def page_clinic(user: UserContext) -> None:
 
         upcoming = list_appointments(today, today + timedelta(days=60))
         if upcoming:
-            st.dataframe(pd.DataFrame(upcoming), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(upcoming), width="stretch", hide_index=True)
 
     with encounter_tab:
         require(user, "write")
@@ -440,9 +453,10 @@ def page_clinic(user: UserContext) -> None:
             alabel = st.selectbox("Appointment", list(amap.keys()))
             chosen = amap[alabel]; patient_id = int(chosen["patient_id"]); appointment_id = int(chosen["id"])
         else:
-            plabel = st.selectbox("Patient", list(pmap.keys()), key="enc_patient")
+            plabel = st.selectbox("Patient", list(pmap.keys()), index=_default_patient_index(pmap), key="enc_patient")
             patient_id = pmap[plabel]
-        patient = get_patient(patient_id); _patient_banner(patient)
+        st.session_state["selected_patient_id"] = int(patient_id)
+        patient = get_patient(patient_id); patient_context_banner(patient_snapshot(patient_id))
 
         template_name = st.selectbox("Clinical template", ["Blank"] + list(CLINIC_TEMPLATES.keys()))
         template = CLINIC_TEMPLATES.get(template_name, {})
@@ -522,7 +536,7 @@ def page_clinic(user: UserContext) -> None:
 
 
 def page_prescriptions(user: UserContext) -> None:
-    st.markdown("## الوصفات والعلاج Prescribing")
+    page_heading("الوصفات والعلاج", "Prescribing", "وصفة منظمة، مراجعة الحساسية، وسجل Medication reconciliation.")
     patients, pmap = _patients_map()
     if not pmap:
         st.info("No patients.")
@@ -531,9 +545,10 @@ def page_prescriptions(user: UserContext) -> None:
 
     with create_tab:
         require(user, "write")
-        selected = st.selectbox("Patient", list(pmap.keys()), key="rx_patient")
+        selected = st.selectbox("Patient", list(pmap.keys()), index=_default_patient_index(pmap), key="rx_patient")
         patient_id = pmap[selected]
-        patient = get_patient(patient_id); _patient_banner(patient)
+        st.session_state["selected_patient_id"] = int(patient_id)
+        patient = get_patient(patient_id); patient_context_banner(patient_snapshot(patient_id))
         allergies = list_allergies(patient_id)
         active_meds = list_active_medication_names(patient_id)
         if not allergies and "No known allergies" not in str(patient.get("allergies") or ""):
@@ -624,13 +639,14 @@ def page_prescriptions(user: UserContext) -> None:
 
     with reconciliation_tab:
         require(user, "write")
-        selected = st.selectbox("Patient for reconciliation", list(pmap.keys()), key="recon_patient")
+        selected = st.selectbox("Patient for reconciliation", list(pmap.keys()), index=_default_patient_index(pmap), key="recon_patient")
         patient_id = pmap[selected]
+        st.session_state["selected_patient_id"] = int(patient_id)
         patient = get_patient(patient_id)
-        _patient_banner(patient)
+        patient_context_banner(patient_snapshot(patient_id))
         rows = list_medication_reconciliations(patient_id)
         if rows:
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
         with st.form("medication_reconciliation_form", clear_on_submit=True):
             st.markdown("#### Reconcile a home medication")
             c1, c2, c3 = st.columns(3)
@@ -647,7 +663,7 @@ def page_prescriptions(user: UserContext) -> None:
                     st.success("Medication reconciliation saved."); st.rerun()
 
 def page_investigations(user: UserContext) -> None:
-    st.markdown("## الطلبات والنتائج Investigations & Results Inbox")
+    page_heading("الطلبات والنتائج", "Investigations & results", "إدارة الطلبات ونتائج المختبر والأشعة.")
     patients, pmap = _patients_map()
     request_tab, inbox_tab, all_tab = st.tabs(["New request", "Results inbox", "All requests"])
 
@@ -657,7 +673,7 @@ def page_investigations(user: UserContext) -> None:
             st.info("No patients."); return
         with st.form("new_service_request", clear_on_submit=True):
             c1, c2, c3 = st.columns(3)
-            plabel = c1.selectbox("Patient", list(pmap.keys()))
+            plabel = c1.selectbox("Patient", list(pmap.keys()), index=_default_patient_index(pmap))
             category = c1.selectbox("Category", INVESTIGATION_CATEGORIES)
             options = COMMON_INVESTIGATIONS.get(category, ["Other request"])
             test = c2.selectbox("Test / service", options)
@@ -687,7 +703,7 @@ def page_investigations(user: UserContext) -> None:
     with all_tab:
         requests = list_service_requests()
         if requests:
-            st.dataframe(pd.DataFrame(requests), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(requests), width="stretch", hide_index=True)
             require(user, "write")
             pending = [r for r in requests if r["status"] in {"Requested", "Scheduled", "Collected", "In progress"}]
             if pending:
@@ -709,7 +725,7 @@ def page_investigations(user: UserContext) -> None:
 
 
 def page_followups(user: UserContext) -> None:
-    st.markdown("## المتابعة بعد العملية Post-operative & Longitudinal Follow-up")
+    page_heading("المتابعة بعد العملية", "Post-operative follow-up", "الجروح، الألم، الالتزام بالعلاج، والعودة غير المخطط لها.")
     today = date.today()
     due_tab, new_tab, completed_tab = st.tabs(["Due follow-ups", "Schedule follow-up", "Completed"])
 
@@ -747,7 +763,7 @@ def page_followups(user: UserContext) -> None:
         if pmap:
             with st.form("schedule_followup"):
                 c1, c2 = st.columns(2)
-                plabel = c1.selectbox("Patient", list(pmap.keys()))
+                plabel = c1.selectbox("Patient", list(pmap.keys()), index=_default_patient_index(pmap))
                 ftype = c1.selectbox("Follow-up type", FOLLOWUP_TYPES)
                 due = c2.date_input("Due date", today + timedelta(days=7))
                 notes = c2.text_area("Reason / plan")
@@ -758,13 +774,13 @@ def page_followups(user: UserContext) -> None:
     with completed_tab:
         rows = list_followups(status="Completed")
         if rows:
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
         else:
             st.info("No completed follow-ups.")
 
 
 def page_tasks(user: UserContext) -> None:
-    st.markdown("## المهام السريرية Clinical Tasks")
+    page_heading("المهام السريرية", "Clinical tasks", "قائمة مهام مرتبطة بالمريض مع تاريخ استحقاق وأولوية ومسؤول.")
     today = date.today()
     open_tab, create_tab = st.tabs(["Open tasks", "Create task"])
     with open_tab:
@@ -782,7 +798,7 @@ def page_tasks(user: UserContext) -> None:
         patients, pmap = _patients_map()
         if pmap:
             with st.form("create_patient_task"):
-                plabel = st.selectbox("Patient", list(pmap.keys()))
+                plabel = st.selectbox("Patient", list(pmap.keys()), index=_default_patient_index(pmap))
                 title = st.text_input("Task")
                 c1, c2, c3 = st.columns(3)
                 category = c1.selectbox("Category", ["Results", "Follow-up", "Medication", "Pre-op", "Pathology", "Wound", "Other"])

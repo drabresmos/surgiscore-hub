@@ -14,18 +14,34 @@ from app_pages import (
     page_score_library,
     page_ward_board,
 )
-from auth import can, get_user_context, render_user_sidebar
-from clinic_pages import (
-    page_clinic,
-    page_command_center,
-    page_followups,
-    page_investigations,
-    page_patients,
-    page_prescriptions,
-    page_tasks,
+from app_shell import (
+    render_global_toolbar,
+    render_mobile_quick_navigation,
+    render_sidebar_navigation,
 )
+from auth import can, get_user_context, render_user_sidebar
+from clinic_pages import page_clinic, page_followups, page_prescriptions, page_tasks
 from database import init_db
-from styles import apply_styles, hero
+from navigation import (
+    ADMIN,
+    CLINIC,
+    FOLLOWUP,
+    NEW_OPERATION,
+    PATIENTS,
+    PRESCRIBING,
+    QUALITY,
+    RESULTS,
+    ROLE_HOME,
+    SCORES,
+    STANDARDS,
+    SURGICAL_JOURNEY,
+    TASKS,
+    THEATRE,
+    TODAY,
+    WARD,
+)
+from styles import apply_styles
+from workflow_pages import page_patient_chart, page_results_workspace, page_today_worklist
 
 
 st.set_page_config(
@@ -51,33 +67,43 @@ try:
 except Exception:
     hospital_name = os.getenv("HOSPITAL_NAME", "Surgical Department Pilot")
 
-hero(hospital_name, user.role)
+render_global_toolbar(hospital_name, user)
 render_user_sidebar(user)
 
 PAGES = {
-    "الرئيسية Command center": page_command_center,
-    "المرضى Patient record": page_patients,
-    "العيادة Clinic": page_clinic,
-    "الوصفات Prescribing": page_prescriptions,
-    "الطلبات والنتائج Investigations": page_investigations,
-    "المتابعة Follow-up": page_followups,
-    "المهام Tasks": page_tasks,
-    "تقويم العمليات Theatre calendar": page_calendar,
-    "إضافة عملية New operation": page_new_case,
-    "لوحة الردهات Ward board": page_ward_board,
-    "مسار العملية Surgical journey": page_patient_journey,
-    "السكورات Score library": page_score_library,
-    "الجودة Quality": page_quality,
-    "المعايير Standards": page_governance,
+    TODAY: page_today_worklist,
+    PATIENTS: page_patient_chart,
+    CLINIC: page_clinic,
+    RESULTS: page_results_workspace,
+    PRESCRIBING: page_prescriptions,
+    FOLLOWUP: page_followups,
+    TASKS: page_tasks,
+    THEATRE: page_calendar,
+    NEW_OPERATION: page_new_case,
+    WARD: page_ward_board,
+    SURGICAL_JOURNEY: page_patient_journey,
+    SCORES: page_score_library,
+    QUALITY: page_quality,
+    STANDARDS: page_governance,
 }
-if can(user, "admin"):
-    PAGES["الإدارة Admin"] = page_admin
 
-selected = st.sidebar.radio("Navigation / التنقل", list(PAGES.keys()))
+# Role-aware visibility. Detailed record permissions remain enforced inside each page.
+if user.role in {"nurse", "viewer"}:
+    PAGES.pop(NEW_OPERATION, None)
+if user.role not in {"admin", "consultant", "resident"}:
+    PAGES.pop(PRESCRIBING, None)
+if can(user, "admin"):
+    PAGES[ADMIN] = page_admin
+
+if "nav_page" not in st.session_state:
+    st.session_state["nav_page"] = ROLE_HOME.get(user.role, TODAY)
+
+selected = render_sidebar_navigation(user, set(PAGES.keys()))
+render_mobile_quick_navigation(set(PAGES.keys()))
 
 st.sidebar.divider()
-st.sidebar.caption("SurgiScore Clinical EHR v9.0 — clinic, theatre, ward and follow-up pilot")
-st.sidebar.caption("Clinical pilot: local policies and formal governance remain mandatory.")
+st.sidebar.caption("SurgiScore Clinical EHR v10.0 — workflow-centred pilot")
+st.sidebar.caption("Clinic · Theatre · Ward · Results · Follow-up")
 
 if not user.clinical_mode:
     st.warning(

@@ -1,80 +1,73 @@
-# SurgiScore Clinical EHR v9
+# SurgiScore Clinical EHR v10
 
-Responsive bilingual **clinic + theatre + ward + follow-up** pilot for a general-surgery service.
+A bilingual Arabic/English **workflow-centred surgical clinical pilot** for clinic, theatre, ward, results, prescribing and post-operative follow-up.
 
-## What is new in v9
+> **Safety status:** This is a pilot and decision-support application. It is not a certified medical device or an accredited hospital EHR. Do not use identifiable patient data on a public Streamlit Community Cloud deployment. Clinical adoption requires hospital-controlled hosting, governance, validation, security testing, training, backup/restore testing and approval by surgery, anesthesia, nursing, pharmacy, infection control, IT and privacy teams.
 
-- Longitudinal patient chart and timeline.
-- Clinic appointments, monthly calendar, daily queue and status workflow.
-- Structured surgical clinic encounter with templates, vital signs and electronic signing.
-- One-click conversion of a clinic decision into a scheduled surgical case.
-- Structured problem list and allergy/intolerance register.
-- Structured prescriptions with multiple medication items, printable bilingual HTML and audit trail.
-- Medication safety checks for documented allergies, duplicate active therapy and selected high-risk medicines.
-- Medication reconciliation across clinic, admission, pre-op, transfer, discharge and follow-up.
-- Investigation ordering, result entry, abnormal/critical flags and result acknowledgement inbox.
-- Post-operative follow-up scheduler and structured wound/pain/intake/mobility/medication review.
-- Patient-linked clinical tasks and due-date dashboard.
-- Existing v8 theatre calendar, WHO checklist workflow, pre-op tasks, NEWS2, ward rounds, scoring library, FHIR-style export and quality dashboards retained.
-- Improved Apple-inspired responsive UI for mobile and iPad.
+## What changed in v10
 
-## Important status
+The interface was redesigned around the way hospital teams work rather than around isolated software modules.
 
-This is a **clinical pilot**, not a certified production EHR. Do not use real patient data on public Streamlit Community Cloud.
+- Role-aware **My Worklist** for due tasks, results, clinic, theatre and ward work
+- Compact hospital-style application header instead of a large landing banner
+- Global search across patients, MRN, phone, appointments, operations and results
+- Quick-add dialog for patients, appointments, tasks and surgical cases
+- Persistent selected-patient context between modules
+- Unified **Longitudinal Patient Chart** with:
+  - Overview and timeline
+  - Visits and encounters
+  - Problems and structured allergies
+  - Medications and reconciliation
+  - Orders and results
+  - Surgical episodes
+  - Follow-up
+  - Documents and images
+- Surgical pathway stepper from decision to closure
+- Theatre **Calendar/List** views with direct pathway access
+- Action-oriented Results Inbox with acknowledge, task creation and patient navigation
+- Operational Ward Board with NEWS2, observation due status, POD, pain, filters and quick observations
+- Mobile/iPad quick navigation and smaller touch-friendly responsive components
+- Role-aware page visibility while retaining server-side permission checks
+- Search-safe output escaping and existing audit trail preservation
+- No new database tables: v10 remains compatible with the v9 schema
 
-Before clinical deployment use:
+## Main files
 
-- Institutional OIDC/SSO and MFA.
-- Managed PostgreSQL.
-- Private encrypted attachment storage.
-- Tested encrypted backup and restore.
-- Formulary-approved medication catalogue and interaction knowledge base.
-- Local governance approval for clinical templates, escalation rules, scores and prescribing.
-- Privacy, security, penetration and user-acceptance testing.
-
-## Files
-
-- `app.py` — application entry point.
-- `clinic_pages.py` — clinic, patient record, prescribing, investigations, follow-up and task UI.
-- `app_pages.py` — theatre, ward, scoring, governance and quality UI from v8.
-- `database.py` — SQLAlchemy data model and audited persistence.
-- `clinic_catalog.py` — appointment, investigation, medication and template catalogues.
-- `medication_safety.py` — pilot safety alerts; not a complete interaction engine.
-- `reports.py` — printable prescription output.
-- `operations_catalog.py`, `scores.py`, `clinical_logic.py`, `clinical_standards.py` — surgical workflow and score logic.
-- `auth.py` — demo/OIDC-aware roles.
-- `styles.py` — responsive UI.
+```text
+app.py                 Application entry point and role-aware routing
+app_shell.py           Global toolbar, search, quick add and navigation
+workflow_pages.py      My Worklist, Patient Chart and Results Workspace
+ui_components.py       Patient banner, workflow stepper and shared UI components
+clinic_pages.py        Clinic, prescribing, follow-up and tasks
+app_pages.py           Theatre, ward, surgical journey, scores and governance
+database.py            SQLAlchemy models, persistence, audit and global search
+styles.py              Responsive hospital-style UI
+```
 
 ## Streamlit Community Cloud deployment
 
-1. Upload all project files to the GitHub repository root.
-2. Open Streamlit Community Cloud and create/redeploy the app.
-3. Main file path:
+Use only with synthetic/test data.
 
-```text
-app.py
-```
+1. Unzip the project.
+2. Upload the **contents** of the folder to the root of the GitHub repository.
+3. In Streamlit Community Cloud set the main file to `app.py`.
+4. Keep `APP_MODE = "demo"`.
+5. Reboot the app after replacing files.
 
-4. For demonstration only, add secrets:
+## Clinical pilot deployment
 
-```toml
-APP_MODE = "demo"
-HOSPITAL_NAME = "Your Surgical Department"
-TIMEZONE = "Asia/Baghdad"
-```
+A controlled pilot should use:
 
-SQLite is used automatically when `DATABASE_URL` is absent. Community Cloud storage may reset, so SQLite is not suitable for production persistence.
-
-## PostgreSQL
-
-Set a SQLAlchemy-compatible database URL:
-
-```toml
-DATABASE_URL = "postgresql+psycopg://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require"
-APP_MODE = "clinical"
-```
-
-Configure Streamlit OIDC under `[auth]` according to the deployment identity provider.
+- `APP_MODE = "clinical"`
+- OIDC/SSO with MFA
+- Managed PostgreSQL over TLS
+- Private encrypted object storage for attachments
+- Role-based access and named accounts
+- Encrypted automated backups with tested restoration
+- Separate development, validation and production environments
+- Central audit and security logs
+- Formal medication-safety content and local formulary governance
+- Approved downtime and incident-response procedures
 
 ## Local run
 
@@ -85,18 +78,17 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Automated checks
+## Testing
 
 ```bash
 pip install -r requirements-dev.txt
 pytest -q
 ```
 
-Current package: **11 automated tests passing**.
+## Upgrade from v9
 
-## Clinical limitations
+v10 uses the existing v9 database schema and does not require a destructive migration. Back up the production database before every upgrade. Replace the application files, retain the configured `DATABASE_URL`, and run validation in a non-production environment before release.
 
-- Medication dosing is entered by the authorized clinician; the system does not generate treatment doses.
-- The safety checker is deliberately limited and must not replace a licensed drug interaction and dose-checking knowledge base.
-- Clinical scores and recommendations are decision support only.
-- Signed records should become immutable with formal amendment workflow before production rollout.
+## Adoption gate
+
+Do not move to real clinical use until `docs/DEPLOYMENT_CHECKLIST.md` and `docs/VALIDATION_AND_GOVERNANCE.md` are completed and formally approved.

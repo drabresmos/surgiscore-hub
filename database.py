@@ -1178,3 +1178,146 @@ def export_all_tables() -> dict[str, list[dict[str, Any]]]:
         for model in extra_models:
             out[model.__tablename__] = [model_to_dict(x) for x in s.scalars(select(model)).all()]
     return out
+
+# =========================
+# Workflow and navigation helpers (v10)
+# =========================
+
+def search_records(query: str, limit: int = 12) -> dict[str, list[dict[str, Any]]]:
+    """Search the main clinical records used by the global command bar.
+
+    The function intentionally returns only display-safe metadata. It does not
+    expose attachment bytes or free-text clinical records in search results.
+    """
+    q = (query or "").strip()
+    if len(q) < 2:
+        return {"patients": [], "appointments": [], "operations": [], "results": []}
+    pattern = f"%{q}%"
+    with session_scope() as s:
+        patients_stmt = (
+            select(Patient)
+            .where(
+                Patient.active.is_(True),
+                (
+                    Patient.full_name.ilike(pattern)
+                    | Patient.mrn.ilike(pattern)
+                    | func.coalesce(Patient.phone, "").ilike(pattern)
+                ),
+            )
+            .order_by(Patient.full_name)
+            .limit(limit)
+        )
+        patients = [model_to_dict(x) for x in s.scalars(patients_stmt).all()]
+
+        operations_stmt = (
+            select(Operation, Patient)
+            .join(Patient, Patient.id == Operation.patient_id)
+            .where(
+                Operation.archived.is_(False),
+                (
+                    Operation.operation_name.ilike(pattern)
+                    | Operation.diagnosis.ilike(pattern)
+                    | Patient.full_name.ilike(pattern)
+                    | Patient.mrn.ilike(pattern)
+                    | func.coalesce(Operation.surgeon, "").ilike(pattern)
+                ),
+            )
+            .order_by(Operation.operation_date.desc())
+            .limit(limit)
+        )
+        operations: list[dict[str, Any]] = []
+        for operation, patient in s.execute(operations_stmt).all():
+            row = model_to_dict(operation)
+            row.update({"patient_name": patient.full_name, "mrn": patient.mrn})
+            operations.append(row)
+
+        appointments_stmt = (
+            select(Appointment, Patient)
+            .join(Patient, Patient.id == Appointment.patient_id)
+            .where(
+                Patient.full_name.ilike(pattern)
+                | Patient.mrn.ilike(pattern)
+                | Appointment.appointment_type.ilike(pattern)
+                | func.coalesce(Appointment.clinician, "").ilike(pattern)
+            )
+            .order_by(Appointment.appointment_date.desc(), Appointment.start_time.desc())
+            .limit(limit)
+        )
+        appointments: list[dict[str, Any]] = []
+        for appointment, patient in s.execute(appointments_stmt).all():
+            row = model_to_dict(appointment)
+            row.update({"patient_name": patient.full_name, "mrn": patient.mrn})
+            appointments.append(row)
+
+        results_stmt = (
+            select(DiagnosticResult, ServiceRequest, Patient)
+            .join(ServiceRequest, ServiceRequest.id == DiagnosticResult.request_id)
+            .join(Patient, Patient.id == DiagnosticResult.patient_id)
+            .where(
+                Patient.full_name.ilike(pattern)
+                | Patient.mrn.ilike(pattern)
+                | ServiceRequest.test_name.ilike(pattern)
+            )
+            .order_by(DiagnosticResult.resulted_at.desc())
+            .limit(limit)
+        )
+        results: list[dict[str, Any]] = []
+        for result, request, patient in s.execute(results_stmt).all():
+            row = model_to_dict(result)
+            row.update(
+                {
+                    "test_name": request.test_name,
+                    "request_status": request.status,
+                    "patient_name": patient.full_name,
+                    "mrn": patient.mrn,
+                }
+            )
+            results.append(row)
+
+    return {
+        "patients": patients,
+        "appointments": appointments,
+        "operations": operations,
+        "results": results,
+    }
+
+
+def list_operations_for_patient(patient_id: int, include_archived: bool = True) -> list[dict[str, Any]]:
+    with session_scope() as s:
+        stmt = select(Operation).where(Operation.patient_id == patient_id)
+        if not include_archived:
+            stmt = stmt.where(Operation.archived.is_(False))
+        stmt = stmt.order_by(Operation.operation_date.desc(), Operation.start_time.desc())
+        return [model_to_dict(x) for x in s.scalars(stmt).all()]
+
+
+def patient_snapshot(patient_id: int) -> dict[str, Any]:
+    """Return the concise longitudinal context used by the patient banner."""
+    patient = get_patient(patient_id)
+    if not patient:
+        return {}
+    operations = list_operations_for_patient(patient_id, include_archived=False)
+    active_operation = next(
+        (
+            op
+            for op in operations
+            if op.get("status") not in {"Discharged", "Cancelled", "Closed"}
+        ),
+        None,
+    )
+    problems = [x for x in list_problems(patient_id, include_resolved=False) if x.get("status") == "Active"]
+    allergies = list_allergies(patient_id, active_only=True)
+    active_medications = list_active_medication_names(patient_id)
+    open_tasks = list_patient_tasks(patient_id=patient_id, status="Open")
+    unreviewed_results = list_results(patient_id=patient_id, unreviewed_only=True)
+    due_followups = list_followups(patient_id=patient_id, status="Due")
+    return {
+        "patient": patient,
+        "active_operation": active_operation,
+        "active_problems": problems,
+        "allergies": allergies,
+        "active_medications": active_medications,
+        "open_tasks": open_tasks,
+        "unreviewed_results": unreviewed_results,
+        "due_followups": due_followups,
+    }
