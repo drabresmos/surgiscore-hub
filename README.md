@@ -1,11 +1,21 @@
-# SurgiScore Ward v7
+# SurgiScore Hub v5
 
-Arabic/English Streamlit app for surgical ward management: monthly operation calendar, operation scheduling, pre-op checklist, intra-op notes, post-op morning/evening rounds, vitals, wound/drain/follow-up, attachments, and surgical scores.
+Arabic/English surgical board platform for operation scheduling, monthly calendar, patient archive, surgical scores, and attachments.
 
-## Deploy on Streamlit Cloud
-- Upload all files to GitHub.
-- Main file path: `app.py`
-- Requirements: `streamlit`, `pandas`
+## Streamlit Cloud
+Main file path:
+
+```text
+app.py
+```
+
+## Files
+- app.py
+- database.py
+- data_library.py
+- scores_library.py
+- styles.py
+- requirements.txt
 
 ## Notes
-SQLite and uploaded files are stored in the app environment. For production use, move storage to PostgreSQL/Supabase/S3.
+SQLite storage works in Streamlit runtime, but for production use prefer Supabase/PostgreSQL.

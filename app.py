@@ -1,249 +1,208 @@
 import streamlit as st
 import pandas as pd
 import calendar
-from datetime import date, datetime
-from pathlib import Path
-
-from styles import apply_styles, hero
-from data import COMMON_OPERATIONS, STATUS_OPTIONS, URGENCY_OPTIONS, WOUND_OPTIONS, ASA_OPTIONS, recommended_scores, SCORE_DESCRIPTIONS
+from datetime import date
 from database import *
-from scores import render_score
+from styles import inject_styles
+from data_library import GENERAL_SURGERY_OPERATIONS, SCORE_CATEGORIES, SCORE_DESCRIPTIONS, suggested_scores_for_operation
+from scores_library import render_score, risk_badge
 
-st.set_page_config(page_title='SurgiScore Ward', page_icon='🏥', layout='wide')
-apply_styles(); init_db(); hero()
+st.set_page_config(page_title='SurgiScore Hub', page_icon='🏥', layout='wide')
+init_db(); inject_styles(st)
 
-st.sidebar.title('SurgiScore Ward')
-page = st.sidebar.radio('Navigation', ['Monthly Calendar', 'Add Operation', 'Patient Journey', 'Ward Rounds', 'Score Library', 'Attachments', 'Archive / Backup'])
+st.markdown('''<div class="hero"><div class="title">🏥 SurgiScore Hub</div><div class="subtitle">منصة Board-ready لجدولة العمليات وحساب Surgical Scores — مناسبة للموبايل والآيباد واللابتوب</div><span class="pill">Calendar • Operation Archive • Surgical Scores • Attachments</span></div>''', unsafe_allow_html=True)
 
-ops = get_operations()
+st.sidebar.title('SurgiScore Hub')
+page=st.sidebar.radio('Navigation',['الواجهة الرئيسية / Monthly Calendar','إضافة موعد عملية','تفاصيل عملية / Archive','Score Library','المرضى','النتائج والنسخ الاحتياطي'])
 
-def status_class(s):
-    return {'Scheduled':'status-scheduled','Pre-op':'status-preop','Intra-op':'status-intraop','Post-op':'status-postop'}.get(s,'status-scheduled')
+patients=get_patients(); ops_all=get_operations()
 
-def op_label(op):
-    return f"#{op['id']} • {op['patient_name']} • {op['operation_type']} • {op['operation_date']} {op['start_time']}"
+STATUS_CLASSES={'Planned':'status-planned','Done':'status-done','Cancelled':'status-cancelled','Delayed':'status-delayed'}
 
-# ------------------ Calendar ------------------
-if page == 'Monthly Calendar':
-    st.markdown('### التقويم الشهري للعمليات Monthly Operation Calendar')
-    today = date.today()
-    c1,c2,c3 = st.columns([1,1,2])
-    month = c1.selectbox('Month', list(range(1,13)), index=today.month-1)
-    year = c2.number_input('Year', 2020, 2100, today.year)
-    c3.info('داخل كل يوم يظهر عدد العمليات حسب الحالة. يمكن إضافة موعد جديد من الزر أدناه.')
-    if st.button('➕ إضافة موعد عملية جديد Add operation'):
-        st.session_state['go_add']=True
-        st.switch_page('app.py') if False else None
-    month_ops = get_ops_by_month(int(year), int(month))
-    by_day = {}
-    for o in month_ops:
-        by_day.setdefault(o['operation_date'], []).append(o)
-    cal = calendar.monthcalendar(int(year), int(month))
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.write(f'**{calendar.month_name[int(month)]} {int(year)}**')
-    weekdays = st.columns(7)
-    for i,w in enumerate(['Mon','Tue','Wed','Thu','Fri','Sat','Sun']): weekdays[i].markdown(f'**{w}**')
-    for week in cal:
-        cols = st.columns(7)
-        for i,d in enumerate(week):
+def patient_select_or_create(prefix=''):
+    mode=st.radio('Patient mode',['اختيار مريض موجود','إضافة مريض جديد'], horizontal=True, key=prefix+'pmode')
+    if mode=='اختيار مريض موجود' and patients:
+        label_map={f"{p['code']} — {p['name']} ({p['age']}y)":p['id'] for p in patients}
+        chosen=st.selectbox('Patient', list(label_map.keys()), key=prefix+'existing')
+        return label_map[chosen]
+    st.markdown('#### معلومات المريض الأساسية')
+    c1,c2=st.columns(2)
+    with c1:
+        code=st.text_input('Patient Code / ID', key=prefix+'code')
+        name=st.text_input('Patient Name', key=prefix+'name')
+        age=st.number_input('Age',0,120,30,key=prefix+'age')
+        sex=st.selectbox('Sex',['Male','Female'],key=prefix+'sex')
+    with c2:
+        phone=st.text_input('Phone optional', key=prefix+'phone')
+        diagnosis=st.text_input('Diagnosis', key=prefix+'dx')
+        notes=st.text_area('Patient Notes', key=prefix+'notes')
+    if not code:
+        code=f'AUTO-{date.today().strftime("%Y%m%d")}-{len(patients)+1}'
+    return add_patient(code,name,age,sex,phone,diagnosis,notes)
+
+def save_uploaded_files(pid, oid, key):
+    files=st.file_uploader('رفع صور التحاليل أو الأشعة أو PDF / Upload labs, imaging, reports', type=['png','jpg','jpeg','pdf','txt','csv'], accept_multiple_files=True, key=key)
+    if files:
+        for f in files:
+            add_attachment(pid, oid, f.name, f.type, f.getvalue())
+        st.success('تم حفظ المرفقات')
+
+if page=='الواجهة الرئيسية / Monthly Calendar':
+    today=date.today()
+    colA,colB,colC=st.columns([1,1,2])
+    month=colA.selectbox('Month', list(range(1,13)), index=today.month-1)
+    year=colB.number_input('Year',2020,2035,today.year)
+    month_key=f'{int(year):04d}-{int(month):02d}'
+    ops=get_operations(month_key)
+    st.markdown('### التقويم الشهري للعمليات')
+    cal=calendar.Calendar(firstweekday=5)  # Saturday start
+    weeks=cal.monthdatescalendar(int(year), int(month))
+    by_day={}
+    for o in ops: by_day.setdefault(o['op_date'],[]).append(o)
+    headers=['Sat','Sun','Mon','Tue','Wed','Thu','Fri']
+    cols=st.columns(7)
+    for i,h in enumerate(headers): cols[i].markdown(f'**{h}**')
+    for wk in weeks:
+        cols=st.columns(7)
+        for i,d in enumerate(wk):
+            day_ops=by_day.get(d.isoformat(),[])
+            muted=' day-muted' if d.month!=month else ''
             with cols[i]:
-                if d==0:
-                    st.write('')
-                else:
-                    ds=f'{int(year):04d}-{int(month):02d}-{d:02d}'
-                    dayops=by_day.get(ds, [])
-                    st.markdown('<div class="day-card">', unsafe_allow_html=True)
-                    st.markdown(f'**{d}**')
-                    if dayops:
-                        counts={}
-                        for o in dayops: counts[o['status']]=counts.get(o['status'],0)+1
-                        for k,v in counts.items(): st.markdown(f"<span class='{status_class(k)}'>{k}: {v}</span>", unsafe_allow_html=True)
-                        with st.expander('Cases'):
-                            for o in dayops: st.caption(f"{o['start_time']} • {o['patient_name']} • {o['operation_type']}")
-                    else:
-                        st.caption('No cases')
-                    st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown(f"<div class='day-card{muted}'><div class='day-number'>{d.day}</div>", unsafe_allow_html=True)
+                if day_ops:
+                    counts={s:sum(1 for x in day_ops if x['status']==s) for s in ['Planned','Done','Delayed','Cancelled']}
+                    for s,n in counts.items():
+                        if n: st.markdown(f"<span class='status-badge {STATUS_CLASSES[s]}'>{s}: {n}</span>", unsafe_allow_html=True)
+                    for x in day_ops[:3]: st.caption(f"{x['start_time']} • {x['operation_type'][:24]}")
+                else: st.caption('No cases')
+                st.markdown('</div>', unsafe_allow_html=True)
+    st.divider()
+    st.markdown('### إضافة موعد جديد مباشرة')
+    with st.expander('➕ New operation appointment', expanded=False):
+        pid=patient_select_or_create('quick_')
+        c1,c2,c3=st.columns(3)
+        op_date=c1.date_input('Operation Date', today, key='quickdate')
+        start_time=c2.time_input('Start Time', key='quicktime')
+        status=c3.selectbox('Status',['Planned','Done','Delayed','Cancelled'], key='quickstatus')
+        op_type=st.selectbox('Operation Type', GENERAL_SURGERY_OPERATIONS, key='quickop')
+        c4,c5,c6=st.columns(3)
+        surgeon=c4.text_input('Responsible Surgeon', key='quicksurgeon')
+        assistant=c5.text_input('Assistant / Resident', key='quickassistant')
+        theatre=c6.text_input('Theatre / OR', key='quickor')
+        anesthesia=st.selectbox('Anesthesia',['General anesthesia','Spinal anesthesia','Local anesthesia','Sedation','TBD'], key='quickan')
+        priority=st.selectbox('Priority',['Elective','Urgent','Emergency'], key='quickpriority')
+        indication=st.text_area('Indication', key='quickind')
+        details=st.text_area('Operation details / plan', key='quickdetails')
+        suggested=suggested_scores_for_operation(op_type)
+        selected_scores=st.multiselect('السكورات المقترحة للمريض / Suggested Scores', sum(SCORE_CATEGORIES.values(),[]), default=suggested, key='quickscores')
+        if st.button('حفظ الإجراء وأرشفته'):
+            oid=add_operation(pid, op_date.isoformat(), start_time.strftime('%H:%M'), op_type, surgeon, assistant, anesthesia, priority, status, theatre, indication, details)
+            st.session_state['last_operation_id']=oid
+            st.success('تم حفظ موعد العملية. انتقل إلى تفاصيل العملية لحساب السكورات ورفع الملفات.')
 
-    with st.expander('➕ إضافة موعد مباشر من التقويم'):
-        default_day = st.date_input('Operation date', value=today)
-        st.info('بعد الحفظ، افتح Patient Journey لإكمال Pre-op / Intra-op / Post-op.')
-        with st.form('quick_add'):
-            q1,q2=st.columns(2)
-            patient_code=q1.text_input('Patient code / رقم المريض')
-            patient_name=q1.text_input('Patient name / اسم المريض')
-            age=q1.number_input('Age',0,120,30); sex=q1.selectbox('Sex',['Male','Female'])
-            phone=q1.text_input('Phone')
-            diagnosis=q2.text_input('Diagnosis')
-            op_type=q2.selectbox('Operation type', COMMON_OPERATIONS)
-            start_time=q2.time_input('Start time')
-            surgeon=q2.text_input('Responsible surgeon')
-            urgency=q2.selectbox('Urgency', URGENCY_OPTIONS)
-            if st.form_submit_button('Save operation'):
-                opid=add_operation({'patient_code':patient_code,'patient_name':patient_name,'age':age,'sex':sex,'phone':phone,'diagnosis':diagnosis,'operation_type':op_type,'operation_date':str(default_day),'start_time':start_time.strftime('%H:%M'),'surgeon':surgeon,'assistant':'','anesthesia':'','urgency':urgency,'wound_class':'','status':'Scheduled','bed':'','notes':''})
-                st.success(f'Operation archived. ID: {opid}')
-                st.rerun()
+elif page=='إضافة موعد عملية':
+    st.markdown('### إضافة موعد عملية جديد')
+    with st.form('new_operation_form'):
+        pid=patient_select_or_create('new_')
+        st.markdown('#### تفاصيل العملية')
+        c1,c2,c3=st.columns(3)
+        op_date=c1.date_input('Operation Date', date.today())
+        start_time=c2.time_input('Start Time')
+        status=c3.selectbox('Status',['Planned','Done','Delayed','Cancelled'])
+        op_type=st.selectbox('Operation Type / نوع العملية', GENERAL_SURGERY_OPERATIONS)
+        c4,c5,c6=st.columns(3)
+        surgeon=c4.text_input('Responsible Surgeon')
+        assistant=c5.text_input('Assistant / Resident')
+        theatre=c6.text_input('Theatre / OR')
+        anesthesia=st.selectbox('Anesthesia',['General anesthesia','Spinal anesthesia','Local anesthesia','Sedation','TBD'])
+        priority=st.selectbox('Priority',['Elective','Urgent','Emergency'])
+        indication=st.text_area('Indication')
+        details=st.text_area('Other operation details')
+        suggested=suggested_scores_for_operation(op_type)
+        selected_scores=st.multiselect('Suggested scores to calculate after saving', sum(SCORE_CATEGORIES.values(),[]), default=suggested)
+        submitted=st.form_submit_button('Save operation')
+    if submitted:
+        oid=add_operation(pid, op_date.isoformat(), start_time.strftime('%H:%M'), op_type, surgeon, assistant, anesthesia, priority, status, theatre, indication, details)
+        st.session_state['last_operation_id']=oid
+        st.success('Saved. افتح صفحة تفاصيل عملية / Archive لإضافة السكورات والمرفقات.')
 
-# ------------------ Add Operation ------------------
-elif page == 'Add Operation':
-    st.markdown('### إضافة موعد/حالة عملية New Operation')
-    with st.form('add_full_operation'):
-        st.markdown('#### Patient basics')
-        a,b,c=st.columns(3)
-        patient_code=a.text_input('Patient code')
-        patient_name=a.text_input('Patient name')
-        age=a.number_input('Age',0,120,30); sex=a.selectbox('Sex',['Male','Female'])
-        phone=b.text_input('Phone'); bed=b.text_input('Ward/Bed')
-        diagnosis=b.text_input('Diagnosis')
-        operation_type=c.selectbox('Operation type', COMMON_OPERATIONS)
-        operation_date=c.date_input('Operation date')
-        start_time=c.time_input('Start time')
-        st.markdown('#### Operation details')
-        d,e,f=st.columns(3)
-        surgeon=d.text_input('Responsible surgeon')
-        assistant=d.text_input('Assistant / team')
-        anesthesia=e.selectbox('Anesthesia',["GA","Spinal","Local","Sedation","Other"])
-        urgency=e.selectbox('Urgency', URGENCY_OPTIONS)
-        wound_class=f.selectbox('Wound class', WOUND_OPTIONS)
-        status=f.selectbox('Status', STATUS_OPTIONS)
-        notes=st.text_area('Clinical / operation notes')
-        st.markdown('#### Suggested scores')
-        rec = recommended_scores(operation_type, urgency)
-        st.write(' • '.join(rec))
-        submit=st.form_submit_button('Save and archive procedure')
-        if submit:
-            opid=add_operation({'patient_code':patient_code,'patient_name':patient_name,'age':age,'sex':sex,'phone':phone,'diagnosis':diagnosis,'operation_type':operation_type,'operation_date':str(operation_date),'start_time':start_time.strftime('%H:%M'),'surgeon':surgeon,'assistant':assistant,'anesthesia':anesthesia,'urgency':urgency,'wound_class':wound_class,'status':status,'bed':bed,'notes':notes})
-            # default checklist tasks
-            defaults=['Confirm identity + consent','Check allergies','Review labs/imaging','Antibiotic prophylaxis plan','VTE prophylaxis plan','WHO Sign-in / Time-out / Sign-out','Post-op analgesia + fluids plan']
-            for t in defaults: execute('INSERT INTO tasks(operation_id,phase,task,done) VALUES(?,?,?,0)',(opid,'Pre-op',t))
-            st.success(f'Saved operation #{opid}. Continue in Patient Journey.')
-
-# ------------------ Patient Journey ------------------
-elif page == 'Patient Journey':
-    st.markdown('### مسار المريض الجراحي Surgical Patient Journey')
-    if not ops: st.info('No operations yet.')
+elif page=='تفاصيل عملية / Archive':
+    st.markdown('### أرشيف العمليات والتفاصيل')
+    ops=get_operations()
+    if not ops: st.info('لا توجد عمليات محفوظة بعد.')
     else:
-        op_id = st.selectbox('Select case', [o['id'] for o in ops], format_func=lambda x: op_label(get_operation(x)))
-        op=get_operation(op_id)
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.write(f"**{op['patient_name']}** | {op['age']}y/{op['sex']} | **{op['operation_type']}** | {op['operation_date']} {op['start_time']}")
-        st.caption(f"Surgeon: {op['surgeon']} | Status: {op['status']} | Diagnosis: {op['diagnosis']}")
+        options={f"#{o['id']} | {o['op_date']} {o['start_time']} | {o['code']} — {o['name']} | {o['operation_type']}":o['id'] for o in ops}
+        default_id=st.session_state.get('last_operation_id')
+        keys=list(options.keys()); idx=0
+        if default_id:
+            for i,k in enumerate(keys):
+                if options[k]==default_id: idx=i
+        selected=st.selectbox('Select operation', keys, index=idx)
+        oid=options[selected]; o=get_operation(oid)
+        st.markdown('<div class="apple-card">', unsafe_allow_html=True)
+        c1,c2,c3=st.columns(3)
+        c1.write(f"**Patient:** {o['code']} — {o['name']}"); c1.caption(f"{o['age']}y | {o['sex']} | {o['diagnosis']}")
+        c2.write(f"**Operation:** {o['operation_type']}"); c2.caption(f"{o['op_date']} at {o['start_time']} | {o['status']}")
+        c3.write(f"**Surgeon:** {o['surgeon']}"); c3.caption(f"{o['priority']} | {o['anesthesia']} | {o['theatre']}")
+        st.write(f"**Indication:** {o['indication']}"); st.write(f"**Details:** {o['details']}")
         st.markdown('</div>', unsafe_allow_html=True)
-        tabs=st.tabs(['Pre-op', 'Intra-op', 'Post-op', 'Scores', 'Summary'])
+        tabs=st.tabs(['Scores', 'Attachments', 'Saved results'])
         with tabs[0]:
-            st.markdown('#### Pre-op checklist / تحضير ما قبل العملية')
-            tasks=query('SELECT * FROM tasks WHERE operation_id=? AND phase=?',(op_id,'Pre-op'))
-            if not tasks:
-                st.info('No checklist tasks.')
-            for t in tasks:
-                done=st.checkbox(t['task'], value=bool(t['done']), key=f"task{t['id']}")
-                execute('UPDATE tasks SET done=? WHERE id=?',(1 if done else 0,t['id']))
-            with st.form('add_preop_task'):
-                nt=st.text_input('Add task'); 
-                if st.form_submit_button('Add') and nt: execute('INSERT INTO tasks(operation_id,phase,task,done) VALUES(?,?,?,0)',(op_id,'Pre-op',nt)); st.rerun()
-            new_status=st.selectbox('Update status', STATUS_OPTIONS, index=STATUS_OPTIONS.index(op['status']) if op['status'] in STATUS_OPTIONS else 0)
-            if st.button('Save status'): update_operation(op_id, {'status':new_status}); st.success('Updated'); st.rerun()
+            suggested=suggested_scores_for_operation(o['operation_type'])
+            score=st.selectbox('Choose score', sum(SCORE_CATEGORIES.values(),[]), index=0)
+            if score in suggested: st.success('هذا السكور مقترح لهذه العملية')
+            st.info(SCORE_DESCRIPTIONS.get(score,''))
+            result, interpretation, risk=render_score(score)
+            st.metric(score, result); st.write(interpretation); risk_badge(risk)
+            if st.button('Save score result'):
+                add_result(o['patient_id'], oid, score, result, interpretation, risk); st.success('Score archived')
         with tabs[1]:
-            st.markdown('#### Intra-op note / تفاصيل أثناء العملية')
-            with st.form('intraop'):
-                c1,c2=st.columns(2)
-                incision=c1.time_input('Incision time'); closure=c1.time_input('Closure time')
-                findings=st.text_area('Findings')
-                procedure_done=st.text_area('Procedure done')
-                blood_loss=c2.text_input('Blood loss'); specimens=c2.text_input('Specimens'); drains=c2.text_input('Drains')
-                complications=st.text_area('Intra-op complications')
-                sign_in=st.checkbox('WHO Sign-in done')
-                time_out=st.checkbox('WHO Time-out done')
-                sign_out=st.checkbox('WHO Sign-out done')
-                if st.form_submit_button('Save intra-op note'):
-                    add_intraop({'operation_id':op_id,'incision_time':incision.strftime('%H:%M'),'closure_time':closure.strftime('%H:%M'),'findings':findings,'procedure_done':procedure_done,'blood_loss':blood_loss,'specimens':specimens,'drains':drains,'complications':complications,'sign_in_done':int(sign_in),'time_out_done':int(time_out),'sign_out_done':int(sign_out)})
-                    update_operation(op_id, {'status':'Post-op'}); st.success('Saved')
-            notes=get_intraop(op_id)
-            if notes: st.dataframe(pd.DataFrame(notes), use_container_width=True)
+            save_uploaded_files(o['patient_id'], oid, 'archive_upload')
+            for a in get_attachments(oid):
+                st.markdown('<div class="apple-card">', unsafe_allow_html=True)
+                cc1,cc2,cc3=st.columns([4,2,1])
+                cc1.write(f"**{a['filename']}**"); cc1.caption(f"{a['filetype']} | {a['created_at']}")
+                cc2.download_button('Download', a['data'], a['filename'], a['filetype'], key=f"dl{a['id']}")
+                if cc3.button('Delete', key=f"ad{a['id']}"):
+                    delete_attachment(a['id']); st.rerun()
+                if str(a['filetype']).startswith('image'): st.image(a['data'], width=360)
+                st.markdown('</div>', unsafe_allow_html=True)
         with tabs[2]:
-            st.markdown('#### Post-op recovery / متابعة الشفاء')
-            st.info('أدخل العلامات الحيوية صباحاً ومساءً مع wound, drain, oral intake, bowel function, mobility, plan.')
-            with st.form('round'):
-                r1,r2,r3=st.columns(3)
-                round_date=r1.date_input('Round date')
-                shift=r1.selectbox('Shift',['Morning','Evening','Night','Extra'])
-                temp=r1.number_input('Temp °C',30.0,43.0,37.0)
-                pulse=r2.number_input('Pulse',20,220,80); bp=r2.text_input('BP','120/80'); rr=r2.number_input('RR',5,60,18); spo2=r2.number_input('SpO2',50,100,98)
-                pain=r3.slider('Pain score',0,10,2); urine=r3.text_input('Urine output'); drain=r3.text_input('Drain output')
-                wound=st.selectbox('Wound status',['Dry/clean','Mild erythema','Discharge','Dehiscence concern','Infected concern'])
-                oral=st.selectbox('Oral intake',['NPO','Sips','Fluids','Soft diet','Normal diet'])
-                bowel=st.selectbox('Bowel function',['No flatus/stool','Flatus','Stool','Diarrhea','Ileus concern'])
-                mobility=st.selectbox('Mobility',['Bedbound','Sitting','Walking with help','Independent walking'])
-                antibiotics=st.text_input('Antibiotics'); anticoag=st.text_input('Anticoagulation/VTE plan'); plan=st.text_area('Plan')
-                if st.form_submit_button('Save ward round'):
-                    add_round({'operation_id':op_id,'round_date':str(round_date),'shift':shift,'temp':temp,'pulse':pulse,'bp':bp,'rr':rr,'spo2':spo2,'pain_score':pain,'urine_output':urine,'drain_output':drain,'wound_status':wound,'oral_intake':oral,'bowel_function':bowel,'mobility':mobility,'antibiotics':antibiotics,'anticoagulation':anticoag,'plan':plan})
-                    st.success('Ward round saved')
-            rounds=get_rounds(op_id)
-            if rounds: st.dataframe(pd.DataFrame(rounds), use_container_width=True)
-        with tabs[3]:
-            st.markdown('#### Recommended scores / السكورات المقترحة')
-            rec=recommended_scores(op['operation_type'], op['urgency'])
-            selected=st.multiselect('Scores to calculate', list(SCORE_DESCRIPTIONS.keys()), default=rec)
-            chosen=st.selectbox('Open calculator', selected if selected else rec)
-            res,interp,risk=render_score(chosen)
-            notes=st.text_area('Score notes')
-            if st.button('Save score'):
-                add_score(op_id, chosen, res, interp, risk, notes); st.success('Score saved')
-            sc=get_scores(op_id)
-            if sc: st.dataframe(pd.DataFrame(sc), use_container_width=True)
-        with tabs[4]:
-            scores=get_scores(op_id); rounds=get_rounds(op_id); intra=get_intraop(op_id)
-            summary=f"""Patient: {op['patient_name']} ({op['age']}y/{op['sex']})\nDiagnosis: {op['diagnosis']}\nOperation: {op['operation_type']} on {op['operation_date']} at {op['start_time']}\nSurgeon: {op['surgeon']} | Status: {op['status']}\nScores: {', '.join([s['score_name']+': '+str(s['result']) for s in scores]) if scores else 'No scores yet'}\nLatest plan: {rounds[0]['plan'] if rounds else 'No ward round yet'}"""
-            st.text_area('Clinical summary جاهز للنسخ', summary, height=220)
+            rows=get_results(oid)
+            if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True)
+            else: st.info('No score results yet.')
 
-# ------------------ Ward Rounds page ------------------
-elif page == 'Ward Rounds':
-    st.markdown('### صباحاً ومساءً Morning/Evening Ward Rounds')
-    if not ops: st.info('No operations yet.')
+elif page=='Score Library':
+    st.markdown('### Score Library + شرح مختصر')
+    cat=st.selectbox('Category', list(SCORE_CATEGORIES.keys()))
+    for s in SCORE_CATEGORIES[cat]:
+        st.markdown('<div class="apple-card">', unsafe_allow_html=True)
+        st.write(f"**{s}**")
+        st.caption(SCORE_DESCRIPTIONS.get(s,''))
+        st.markdown('</div>', unsafe_allow_html=True)
+
+elif page=='المرضى':
+    st.markdown('### Patient Registry')
+    if not patients: st.info('No patients yet.')
     else:
-        filt=st.date_input('Show date', value=date.today())
-        todays=[o for o in ops if o['operation_date']<=str(filt) and o['status'] in ['Pre-op','Post-op','Intra-op','Scheduled']]
-        st.caption(f'{len(todays)} active/scheduled cases')
-        for o in todays:
-            with st.expander(op_label(o)):
-                rounds=get_rounds(o['id'])
-                if rounds: st.dataframe(pd.DataFrame(rounds).head(5), use_container_width=True)
-                else: st.info('No vitals/rounds yet.')
-
-# ------------------ Score Library ------------------
-elif page == 'Score Library':
-    st.markdown('### Score Library / مكتبة السكورات')
-    for name, desc in SCORE_DESCRIPTIONS.items():
-        with st.expander(name): st.write(desc)
-
-# ------------------ Attachments ------------------
-elif page == 'Attachments':
-    st.markdown('### المرفقات Attachments')
-    if not ops: st.info('No operations yet.')
-    else:
-        op_id=st.selectbox('Case', [o['id'] for o in ops], format_func=lambda x: op_label(get_operation(x)))
-        desc=st.text_input('Description')
-        files=st.file_uploader('Upload labs, X-ray/CT photos, PDF reports', type=['png','jpg','jpeg','pdf','csv','txt'], accept_multiple_files=True)
-        if files and st.button('Save attachments'):
-            for f in files: add_attachment(op_id, f, desc)
-            st.success('Uploaded')
-        at=get_attachments(op_id)
-        for a in at:
-            st.markdown('<div class="card">', unsafe_allow_html=True)
-            st.write(f"**{a['filename']}** — {a['description']}")
-            p=Path(a['stored_path'])
-            if p.exists(): st.download_button('Download', p.read_bytes(), file_name=a['filename'])
-            if a['filetype'] and a['filetype'].startswith('image') and p.exists(): st.image(p.read_bytes(), width=350)
+        q=st.text_input('Search patient')
+        data=patients
+        if q: data=[p for p in patients if q.lower() in str(p['code']).lower() or q.lower() in str(p['name']).lower()]
+        for p in data:
+            st.markdown('<div class="apple-card">', unsafe_allow_html=True)
+            c1,c2,c3=st.columns([3,3,1])
+            c1.write(f"**{p['code']} — {p['name']}**"); c1.caption(f"{p['age']}y | {p['sex']} | {p['phone'] or ''}")
+            c2.write(f"**Diagnosis:** {p['diagnosis']}"); c2.caption(p['notes'] or '')
+            if c3.button('Delete', key=f"dp{p['id']}"):
+                delete_patient(p['id']); st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
-# ------------------ Archive ------------------
-elif page == 'Archive / Backup':
-    st.markdown('### Archive / Backup')
-    if ops: st.dataframe(pd.DataFrame(ops), use_container_width=True)
-    c1,c2=st.columns(2)
-    c1.download_button('Download operations CSV', pd.DataFrame(ops).to_csv(index=False).encode('utf-8'), 'operations.csv')
-    c2.download_button('Download scores CSV', pd.DataFrame(get_all_scores()).to_csv(index=False).encode('utf-8'), 'scores.csv')
+elif page=='النتائج والنسخ الاحتياطي':
+    st.markdown('### Results / Backup')
+    res=get_results()
+    if res:
+        df=pd.DataFrame(res); st.dataframe(df, use_container_width=True)
+        st.download_button('Download results CSV', df.to_csv(index=False).encode('utf-8-sig'), 'surgiscore_results.csv', 'text/csv')
+    ops=get_operations()
     if ops:
-        del_id=st.selectbox('Delete case', [o['id'] for o in ops], format_func=lambda x: op_label(get_operation(x)))
-        if st.button('Delete selected case permanently'):
-            delete_operation(del_id); st.success('Deleted'); st.rerun()
+        odf=pd.DataFrame(ops); st.download_button('Download operations CSV', odf.to_csv(index=False).encode('utf-8-sig'), 'operations.csv', 'text/csv')
