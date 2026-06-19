@@ -14,12 +14,7 @@ from app_pages import (
     page_score_library,
     page_ward_board,
 )
-from app_shell import (
-    render_global_toolbar,
-    render_mobile_quick_navigation,
-    render_sidebar_navigation,
-)
-from auth import can, get_user_context, render_user_sidebar
+from auth import can, get_user_context
 from clinic_pages import page_clinic, page_followups, page_prescriptions, page_tasks
 from database import init_db
 from navigation import (
@@ -27,36 +22,40 @@ from navigation import (
     CLINIC,
     FOLLOWUP,
     NEW_OPERATION,
-    PATIENTS,
+    PATIENTS as LEGACY_PATIENTS,
     PRESCRIBING,
     QUALITY,
     RESULTS,
-    ROLE_HOME,
     SCORES,
     STANDARDS,
     SURGICAL_JOURNEY,
     TASKS,
     THEATRE,
-    TODAY,
-    WARD,
+    TODAY as LEGACY_TODAY,
+    WARD as LEGACY_WARD,
 )
 from styles import apply_styles
+from v11_pages import page_more, page_patients, page_surgery, page_today, page_ward
+from v11_routes import MORE, PATIENTS, SURGERY, TODAY, WARD, close_legacy
+from v11_shell import render_desktop_navigation, render_mobile_navigation, render_topbar
+from v11_styles import apply_v11_styles
 from workflow_pages import page_patient_chart, page_results_workspace, page_today_worklist
 
 
 st.set_page_config(
-    page_title="SurgiScore Clinical EHR",
+    page_title="SurgiScore Clinical Workspace",
     page_icon="🏥",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 apply_styles()
+apply_v11_styles()
 
 try:
     init_db()
 except Exception as exc:
-    st.error("تعذر تهيئة قاعدة البيانات Database initialization failed")
+    st.error("تعذر تهيئة قاعدة البيانات / Database initialization failed")
     st.exception(exc)
     st.stop()
 
@@ -67,12 +66,20 @@ try:
 except Exception:
     hospital_name = os.getenv("HOSPITAL_NAME", "Surgical Department Pilot")
 
-render_global_toolbar(hospital_name, user)
-render_user_sidebar(user)
+render_topbar(hospital_name, user)
+current_section = render_desktop_navigation(user)
 
-PAGES = {
-    TODAY: page_today_worklist,
-    PATIENTS: page_patient_chart,
+MAIN_PAGE_FUNCS = {
+    TODAY: page_today,
+    PATIENTS: page_patients,
+    SURGERY: page_surgery,
+    WARD: page_ward,
+    MORE: page_more,
+}
+
+LEGACY_PAGE_FUNCS = {
+    LEGACY_TODAY: page_today_worklist,
+    LEGACY_PATIENTS: page_patient_chart,
     CLINIC: page_clinic,
     RESULTS: page_results_workspace,
     PRESCRIBING: page_prescriptions,
@@ -80,40 +87,37 @@ PAGES = {
     TASKS: page_tasks,
     THEATRE: page_calendar,
     NEW_OPERATION: page_new_case,
-    WARD: page_ward_board,
+    LEGACY_WARD: page_ward_board,
     SURGICAL_JOURNEY: page_patient_journey,
     SCORES: page_score_library,
     QUALITY: page_quality,
     STANDARDS: page_governance,
 }
-
-# Role-aware visibility. Detailed record permissions remain enforced inside each page.
-if user.role in {"nurse", "viewer"}:
-    PAGES.pop(NEW_OPERATION, None)
-if user.role not in {"admin", "consultant", "resident"}:
-    PAGES.pop(PRESCRIBING, None)
 if can(user, "admin"):
-    PAGES[ADMIN] = page_admin
-
-if "nav_page" not in st.session_state:
-    st.session_state["nav_page"] = ROLE_HOME.get(user.role, TODAY)
-
-selected = render_sidebar_navigation(user, set(PAGES.keys()))
-render_mobile_quick_navigation(set(PAGES.keys()))
-
-st.sidebar.divider()
-st.sidebar.caption("SurgiScore Clinical EHR v10.0 — workflow-centred pilot")
-st.sidebar.caption("Clinic · Theatre · Ward · Results · Follow-up")
+    LEGACY_PAGE_FUNCS[ADMIN] = page_admin
 
 if not user.clinical_mode:
-    st.warning(
-        "نسخة تجريبية Demo mode: لا تُدخل بيانات مرضى حقيقية. "
-        "الاستخدام السريري يتطلب تسجيل دخول مؤسسي، PostgreSQL مُداراً، تخزيناً خاصاً للمرفقات، نسخاً احتياطية، مراجعة دوائية، واعتماداً سريرياً وأمنياً."
-    )
+    st.caption("⚠ Demo mode — لا تُدخل بيانات مرضى حقيقية. Production use requires institutional authentication and managed infrastructure.")
 
-PAGES[selected](user)
+if st.session_state.get("v11_legacy_mode"):
+    route = st.session_state.get("nav_page")
+    back_col, title_col = st.columns([1, 5])
+    if back_col.button("← رجوع", width="stretch", key="v11_exit_legacy"):
+        close_legacy()
+    title_col.caption("Advanced workspace · مساحة متقدمة")
+    page_fn = LEGACY_PAGE_FUNCS.get(route)
+    if page_fn:
+        page_fn(user)
+    else:
+        st.error("The requested module is unavailable.")
+        if st.button("Return to main workspace"):
+            close_legacy()
+else:
+    MAIN_PAGE_FUNCS[current_section](user)
 
-st.divider()
+render_mobile_navigation(current_section)
+
+st.markdown("<div class='v11-bottom-space'></div>", unsafe_allow_html=True)
 st.caption(
-    "Clinical documentation and decision support only. Prescribing, escalation and treatment remain the responsibility of an authorized clinician under local policy."
+    "Clinical documentation and decision support only. Treatment, prescribing and escalation remain the responsibility of an authorized clinician under local policy."
 )
