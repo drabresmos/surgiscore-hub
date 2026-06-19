@@ -1,21 +1,19 @@
-# SurgiScore Hub v5
+# SurgiScore Hub v6
 
-Arabic/English surgical board platform for operation scheduling, monthly calendar, patient archive, surgical scores, and attachments.
+Arabic/English Streamlit app for general surgery operation scheduling and mandatory score workflow.
+
+## Main features
+- Monthly calendar homepage.
+- Add operation directly with patient data, operation details, surgeon, time, anesthesia, status.
+- Preloaded general surgery operation list ordered by common use.
+- Recommended mandatory surgical scores by operation type.
+- User must either calculate each required score or skip with documented reason.
+- Attach labs, imaging, and PDF reports.
+- Archive and CSV backup.
 
 ## Streamlit Cloud
 Main file path:
+`app.py`
 
-```text
-app.py
-```
-
-## Files
-- app.py
-- database.py
-- data_library.py
-- scores_library.py
-- styles.py
-- requirements.txt
-
-## Notes
-SQLite storage works in Streamlit runtime, but for production use prefer Supabase/PostgreSQL.
+Requirements:
+`streamlit`, `pandas`
